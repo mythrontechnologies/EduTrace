@@ -1,0 +1,6 @@
+apaar_id,student_name,date_of_birth,institution_code,institution_name,programme,academic_session,enrolment_status,source_reference
+999999990001,Synthetic Student TEST-001,,TSTA,Synthetic Institution A,SYNTHETIC PROGRAMME,SYNTHETIC-2026,Active,SYNTH-REF-TSTA-TEST-001
+999999990002,Synthetic Student TEST-002,,TSTA,Synthetic Institution A,SYNTHETIC PROGRAMME,SYNTHETIC-2026,Active,SYNTH-REF-TSTA-TEST-002
+999999990003,Synthetic Student TEST-003,,TSTA,Synthetic Institution A,SYNTHETIC PROGRAMME,SYNTHETIC-2026,Active,SYNTH-REF-TSTA-TEST-003
+SYNTH-ID-TSTA-TEST-004,Synthetic Student TEST-004,,TSTA,Synthetic Institution A,SYNTHETIC PROGRAMME,SYNTHETIC-2026,Active,SYNTH-REF-TSTA-TEST-004
+999999990005,Synthetic Student TEST-005,,TSTA,Synthetic Institution A,SYNTHETIC PROGRAMME,SYNTHETIC-2026,,SYNTH-REF-TSTA-TEST-005

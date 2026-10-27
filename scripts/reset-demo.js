@@ -1,0 +1,1 @@
+const { resetDemo, dataPath } = require('../src/seed'); const db = resetDemo(); console.log(`Reset EduTrace demo with ${db.sourceRecords.length} synthetic source records and ${db.findings.length} findings at ${dataPath()}.`);

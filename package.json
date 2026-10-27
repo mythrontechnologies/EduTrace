@@ -1,0 +1,35 @@
+{
+  "name": "edutrace-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dependency-free SIH26263 reconciliation prototype using synthetic data only.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node --test",
+    "reset-demo": "node scripts/reset-demo.js",
+    "evaluate": "node scripts/evaluate.js",
+    "ai:evaluate": "node scripts/ai-evaluate.js",
+    "ai:live-test": "node scripts/ai-live-test.js",
+    "ai:benchmark-local": "node scripts/ai-benchmark-local.js",
+    "start:local-ai": "node scripts/start-local-ai.js",
+    "evaluate:identity": "node scripts/evaluate-identity.js",
+    "evaluate:independent": "node scripts/evaluate-identity-independent.js",
+    "backup-db": "node scripts/backup-db.js",
+    "restore-rehearsal": "node scripts/restore-rehearsal.js",
+    "migrate:rehearse": "node scripts/migrate-json-to-postgres.js",
+    "benchmark:scale": "node scripts/scale-benchmark.js",
+    "benchmark:history": "node scripts/history-benchmark.js",
+    "db": "node scripts/db.js",
+    "user": "node scripts/user.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "embedded-postgres": "17.10.0-beta.17"
+  }
+}

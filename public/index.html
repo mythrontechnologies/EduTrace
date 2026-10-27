@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#3A0F34">
+  <meta name="description" content="EduTrace AI — synthetic-data prototype for student enrolment reconciliation (SIH26263).">
+  <title>EduTrace AI · Student Data Reconciliation</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233A0F34'/%3E%3Cpath d='M9 21.5 14 16l4 3.5 6-8' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='9' cy='21.5' r='2.2' fill='%23fff'/%3E%3Ccircle cx='24' cy='11.5' r='2.2' fill='%23fff'/%3E%3C/svg%3E">
+  <script>
+    /* Apply the saved or system theme before first paint to avoid a flash of the wrong theme. */
+    (function () {
+      var saved = null;
+      try { saved = localStorage.getItem('edutrace.theme'); } catch (e) { /* storage unavailable */ }
+      var theme = saved === 'dark' || saved === 'light' ? saved : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Icon sprite: Lucide-style 24px stroke icons, inlined so the app works offline -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+    <symbol id="i-reconcile" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+    <symbol id="i-graph" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.5 6h7"/><path d="m7.2 8.2 3.6 7.6"/><path d="m16.8 8.2-3.6 7.6"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M9 3v18"/><path d="m15 10-2 2 2 2"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></symbol>
+    <symbol id="i-file-up" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18v-6"/><path d="m9 15 3-3 3 3"/></symbol>
+    <symbol id="i-alert-octagon" viewBox="0 0 24 24"><path d="M12 16h.01"/><path d="M12 8v4"/><path d="M15.3 2a2 2 0 0 1 1.42.59l4.69 4.69A2 2 0 0 1 22 8.7v6.6a2 2 0 0 1-.59 1.42l-4.69 4.69A2 2 0 0 1 15.3 22H8.7a2 2 0 0 1-1.42-.59l-4.69-4.69A2 2 0 0 1 2 15.3V8.7a2 2 0 0 1 .59-1.42l4.69-4.69A2 2 0 0 1 8.7 2z"/></symbol>
+    <symbol id="i-alert-triangle" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22"/><path d="M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+    <symbol id="i-sort-asc" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+    <symbol id="i-sort-desc" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></symbol>
+    <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/></symbol>
+    <symbol id="i-frame" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 3v6.5L4.6 18.4A1.7 1.7 0 0 0 6.1 21h11.8a1.7 1.7 0 0 0 1.5-2.6L14 9.5V3"/><path d="M7.5 15h9"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M7 21h10"/><path d="M5 7h14"/><path d="m5 7-3 7a3.5 3.5 0 0 0 6 0Z"/><path d="m19 7-3 7a3.5 3.5 0 0 0 6 0Z"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-minus-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M8 12h8"/></symbol>
+    <symbol id="i-git-merge" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/><path d="M6.5 9h2"/><path d="M15.5 9h2"/><path d="M6.5 13h2"/><path d="M15.5 13h2"/></symbol>
+  </svg>
+
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <section class="entry-screen" id="entryScreen" aria-labelledby="entryTitle">
+    <div class="entry-card">
+      <a class="entry-brand" href="#/entry" aria-label="EduTrace AI entry page">
+        <span class="entry-mark" aria-hidden="true">E</span>
+        <span><strong>EduTrace AI</strong><small>Enrolment integrity</small></span>
+      </a>
+      <p class="entry-eyebrow">Choose your workspace</p>
+      <h1 id="entryTitle">Welcome to EduTrace AI</h1>
+      <p class="entry-intro">Explore the read-only demo or test CSV imports in an isolated synthetic workspace.</p>
+      <div class="entry-choices">
+        <article class="entry-choice">
+          <div class="entry-choice-icon" aria-hidden="true">◎</div>
+          <h2>Demo Mode</h2>
+          <p>Explore synthetic enrolment records, findings and reconciliation results in a read-only environment.</p>
+          <p class="entry-safety"><strong>Safety:</strong> Read-only synthetic data.</p>
+          <button type="button" class="btn btn-primary" data-entry-mode="demo">Continue to Demo Login</button>
+        </article>
+        <article class="entry-choice entry-choice-test">
+          <div class="entry-choice-icon" aria-hidden="true">⌁</div>
+          <h2>Synthetic Test Mode</h2>
+          <p>Test CSV uploads, column mapping, validation and institution-scoped reconciliation using generated synthetic data. Changes are temporary and discarded on restart.</p>
+          <p class="entry-safety"><strong>Safety:</strong> Temporary data; imports are allowed only in the isolated test workspace.</p>
+          <button type="button" class="btn btn-primary" data-entry-mode="synthetic-test">Enter Synthetic Test Workspace</button>
+        </article>
+      </div>
+      <p class="entry-status" id="entryStatus" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <div class="shell" id="shell" hidden>
+    <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <div class="sidebar-head">
+        <a class="brand" href="#/overview" aria-label="EduTrace AI — go to overview">
+          <svg class="brand-mark" viewBox="0 0 34 34" aria-hidden="true">
+            <rect class="bm-bg" width="34" height="34" rx="9"/>
+            <path class="bm-line" d="M9.5 22.5 15 17l4.2 3.6 5.8-8.1" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle class="bm-start" cx="9.5" cy="22.5" r="2.4"/>
+            <circle class="bm-end" cx="25" cy="12.5" r="2.6"/>
+          </svg>
+          <span class="brand-text">
+            <span class="brand-name">EduTrace <span>AI</span></span>
+            <span class="brand-sub">SIH26263 · Enrolment integrity</span>
+          </span>
+        </a>
+        <button type="button" class="icon-btn sidebar-close" id="sidebarClose" aria-label="Close navigation">
+          <svg class="icon"><use href="#i-x"/></svg>
+        </button>
+      </div>
+
+      <nav class="nav" aria-label="Main">
+        <p class="nav-section">Workspace</p>
+        <a class="nav-item" href="#/overview" data-route="overview" data-tip="Overview">
+          <svg class="icon" aria-hidden="true"><use href="#i-overview"/></svg><span class="nav-label">Overview</span>
+        </a>
+        <a class="nav-item" href="#/import" data-route="import" data-tip="Import data">
+          <svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><span class="nav-label">Import data</span>
+        </a>
+        <a class="nav-item" href="#/reconciliation" data-route="reconciliation" data-tip="Reconciliation">
+          <svg class="icon" aria-hidden="true"><use href="#i-reconcile"/></svg><span class="nav-label">Reconciliation</span>
+          <span class="nav-count" id="navPending" title="Findings pending review" hidden></span>
+        </a>
+        <a class="nav-item" href="#/matches" data-route="matches" data-tip="Potential matches">
+          <svg class="icon" aria-hidden="true"><use href="#i-git-merge"/></svg><span class="nav-label">Potential matches</span><span class="nav-count" id="navMatchCount" hidden></span>
+        </a>
+        <a class="nav-item" href="#/graph" data-route="graph" data-tip="Integrity graph">
+          <svg class="icon" aria-hidden="true"><use href="#i-graph"/></svg><span class="nav-label">Integrity graph</span>
+        </a>
+        <p class="nav-section">Records</p>
+        <a class="nav-item" href="#/audit" data-route="audit" data-tip="Audit history">
+          <svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span class="nav-label">Audit history</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="demo-card">
+          <div class="demo-card-head"><span class="demo-dot" aria-hidden="true"></span>Demo simulation</div>
+          <label class="demo-label" for="roleSelect">Simulated access role</label>
+          <select id="roleSelect">
+            <option value="regulator">Regulator</option>
+            <option value="institution">NITM institution</option>
+          </select>
+          <p class="demo-note">Not production sign-in. All records are synthetic; APAAR checks are local format checks only.</p>
+          <button type="button" class="demo-reset" id="resetDemo">
+            <svg class="icon icon-xs" aria-hidden="true"><use href="#i-rotate"/></svg>Reset synthetic data
+          </button>
+        </div>
+        <button type="button" class="demo-compact" id="demoCompact" data-tip="Demo simulation · Regulator" aria-label="Demo simulation: open navigation to change the simulated role">
+          <svg class="icon" aria-hidden="true"><use href="#i-flask"/></svg>
+        </button>
+        <button type="button" class="collapse-btn" id="collapseToggle" aria-pressed="false" data-tip="Expand sidebar">
+          <svg class="icon" aria-hidden="true"><use href="#i-panel"/></svg><span class="nav-label">Collapse sidebar</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="scrim" id="scrim" hidden></div>
+
+    <div class="main-col">
+      <header class="topbar">
+        <button type="button" class="icon-btn menu-btn" id="menuBtn" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
+          <svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg>
+        </button>
+        <nav class="crumbs" aria-label="Breadcrumb">
+          <ol>
+            <li>EduTrace AI</li>
+            <li aria-current="page" id="crumbCurrent">Overview</li>
+          </ol>
+        </nav>
+        <form class="global-search" id="globalSearch" role="search">
+          <label class="sr-only" for="globalQuery">Search findings</label>
+          <svg class="icon icon-sm" aria-hidden="true"><use href="#i-search"/></svg>
+          <input id="globalQuery" type="search" placeholder="Search findings, students, rows…" autocomplete="off" aria-keyshortcuts="/">
+          <kbd aria-hidden="true">/</kbd>
+        </form>
+        <div class="topbar-right">
+          <div class="scope-wrap">
+            <button type="button" class="scope-chip" id="scopeChip" aria-haspopup="dialog" aria-expanded="false" aria-controls="scopeMenu">
+              <svg class="icon icon-sm" aria-hidden="true"><use href="#i-flask"/></svg>
+              <span id="scopeText">Demo · Regulator</span>
+              <svg class="icon icon-xs" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+            </button>
+            <div class="scope-menu" id="scopeMenu" role="dialog" aria-label="Simulated access role" hidden>
+              <p class="scope-menu-title">Simulated access role</p>
+              <div class="scope-options" role="radiogroup" aria-label="Simulated access role">
+                <button type="button" role="radio" class="scope-option" data-role="regulator" aria-checked="true">
+                  <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
+                  <span><strong>Regulator</strong><span>All three synthetic institutions</span></span>
+                </button>
+                <button type="button" role="radio" class="scope-option" data-role="institution" aria-checked="false">
+                  <svg class="icon" aria-hidden="true"><use href="#i-building"/></svg>
+                  <span><strong>NITM institution</strong><span>Northbridge Institute of Technology only</span></span>
+                </button>
+              </div>
+              <p class="scope-menu-note">Demo simulation — not production authentication. The server enforces the selected scope on every request.</p>
+            </div>
+          </div>
+          <button type="button" class="icon-btn bordered" id="themeToggle" aria-label="Switch to dark theme" title="Switch to dark theme">
+            <svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" id="exportAll" title="Download every finding in your current access scope as CSV">
+            <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span class="btn-label-md">Export CSV</span>
+          </button>
+        </div>
+      </header>
+      <div class="mode-banner" id="modeBanner" role="status" hidden></div>
+
+      <main id="main" tabindex="-1">
+
+        <!-- ── Overview ─────────────────────────── -->
+        <section class="view" id="view-overview" data-view="overview" aria-labelledby="h-overview" hidden>
+          <header class="ov-head">
+            <svg class="ov-motif" viewBox="0 0 520 160" preserveAspectRatio="xMaxYMid meet" aria-hidden="true">
+              <path class="ov-motif-line" pathLength="1" d="M10 132 L118 96 L196 118 L300 54 L388 76 L510 16"/>
+              <circle class="ov-motif-dot" cx="10" cy="132" r="5"/><circle class="ov-motif-dot" cx="300" cy="54" r="4"/><circle class="ov-motif-dot is-end" cx="510" cy="16" r="6"/>
+            </svg>
+            <div>
+              <h1 class="page-title" id="h-overview" tabindex="-1">Student data, <span class="ov-accent">under control.</span></h1>
+              <p class="page-sub">Your reconciliation at a glance<span id="ovScope"></span></p>
+            </div>
+            <div class="page-actions">
+              <a class="btn btn-secondary" href="#/reconciliation"><svg class="icon" aria-hidden="true"><use href="#i-reconcile"/></svg>Open reconciliation</a>
+              <a class="btn btn-primary" href="#/import"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Import student data</a>
+            </div>
+          </header>
+
+          <div class="metrics ov-metrics" id="ovMetrics" aria-busy="true"></div>
+
+          <div class="ov-next" id="ovNext" aria-live="polite"></div>
+
+          <div class="ov-main">
+            <section class="card ov-panel" aria-labelledby="h-attention">
+              <div class="ov-panel-head">
+                <h2 class="card-title" id="h-attention">Needs attention</h2>
+                <a class="link-btn" href="#/reconciliation?status=pending" id="ovAttentionAll">View all <svg class="icon icon-xs" aria-hidden="true"><use href="#i-arrow-right"/></svg></a>
+              </div>
+              <div id="ovAttention"></div>
+            </section>
+            <section class="card ov-panel" aria-labelledby="h-automation">
+              <div class="ov-panel-head">
+                <h2 class="card-title" id="h-automation">Automated processing</h2>
+                <span id="ovAutomationAction"></span>
+              </div>
+              <div id="ovAutomation"></div>
+            </section>
+          </div>
+
+          <section class="card ov-panel" aria-labelledby="h-notices">
+            <div class="ov-panel-head">
+              <h2 class="card-title" id="h-notices">Exception notifications</h2>
+              <span class="badge badge-plain tone-neutral" id="ovNoticeCount" hidden></span>
+            </div>
+            <div id="ovNotices"></div>
+          </section>
+        </section>
+
+        <!-- ── Import ───────────────────────────── -->
+        <section class="view" id="view-import" data-view="import" aria-labelledby="h-import" hidden>
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Import data</p>
+              <h1 class="page-title" id="h-import" tabindex="-1">Import student data</h1>
+              <p class="page-sub">Upload a CSV, map its columns to the canonical schema, check every row, then confirm. Source values are preserved with row-level provenance.</p>
+            </div>
+          </div>
+
+          <ol class="stepper" id="impStepper" aria-label="Import progress"></ol>
+
+          <div class="imp-layout">
+            <section class="card imp-panel" id="impPanel" aria-live="polite"></section>
+            <aside class="imp-aside">
+              <section class="card" aria-labelledby="h-imp-rules">
+                <div class="card-head"><h2 class="card-title" id="h-imp-rules">How rows are handled</h2></div>
+                <div class="card-body">
+                  <ul class="rule-list">
+                    <li><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg><span><strong>Required values</strong> — student name, institution code, programme, academic session and enrolment status. Rows missing any are rejected and listed.</span></li>
+                    <li><svg class="icon" aria-hidden="true"><use href="#i-alert-triangle"/></svg><span><strong>APAAR identifiers</strong> are optional. Missing or malformed values are imported and raised as validation findings — never silently dropped.</span></li>
+                    <li><svg class="icon" aria-hidden="true"><use href="#i-building"/></svg><span><strong>Institution scope</strong> — rows for a different institution are skipped unless the regulator uses multi-institution mode.</span></li>
+                    <li><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg><span><strong>Local checks only</strong> — format validation is not authoritative APAAR verification.</span></li>
+                  </ul>
+                </div>
+              </section>
+              <section class="card" aria-labelledby="h-imp-corrections" id="impCorrectionsCard" hidden>
+                <div class="card-head">
+                  <h2 class="card-title" id="h-imp-corrections">Possible corrections</h2>
+                  <span class="badge badge-plain st-pending" id="impCorrectionsCount"></span>
+                </div>
+                <div class="card-body" id="impCorrections" aria-live="polite"></div>
+              </section>
+              <section class="card" aria-labelledby="h-imp-history">
+                <div class="card-head">
+                  <h2 class="card-title" id="h-imp-history">Recent batches</h2>
+                  <a class="link-btn" href="#/audit?tab=imports">View all</a>
+                </div>
+                <div class="card-body" id="impHistory"></div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ── Reconciliation ───────────────────── -->
+        <section class="view" id="view-reconciliation" data-view="reconciliation" aria-labelledby="h-rx" hidden>
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Reconciliation</p>
+              <h1 class="page-title" id="h-rx" tabindex="-1">Reconciliation workspace</h1>
+              <p class="page-sub">Search, filter and review findings with their source evidence. Each finding is a signal for human review, not an automatic conclusion.</p>
+            </div>
+            <div class="page-actions">
+              <button type="button" class="btn btn-secondary" id="rxExport" title="Download the findings that match the current search and filters">
+                <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export results
+              </button>
+            </div>
+          </div>
+
+          <div class="card toolbar">
+            <form class="rx-search" id="rxSearchForm" role="search">
+              <div class="search-field">
+                <label class="sr-only" for="rxQuery">Search findings</label>
+                <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+                <input class="input" id="rxQuery" type="search" placeholder="Search student, institution, programme, finding ID…" autocomplete="off" aria-describedby="rxSearchHelp">
+                <button type="button" class="icon-btn icon-btn-sm search-clear" id="rxClearQuery" aria-label="Clear search text" hidden>
+                  <svg class="icon icon-sm" aria-hidden="true"><use href="#i-x"/></svg>
+                </button>
+              </div>
+              <span class="sr-only" id="rxSearchHelp">Press Enter to search. Matches student names, institutions, programmes, source rows, finding IDs, rules, masked APAAR suffixes, files and batches.</span>
+              <button class="btn btn-primary" type="submit">
+                <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>Search
+              </button>
+              <button type="button" class="btn btn-secondary rx-filter-toggle" id="rxFilterToggle" aria-expanded="false" aria-controls="rxFilters">
+                <svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>Filters <span class="count-pill" id="rxFilterCount" hidden></span>
+              </button>
+            </form>
+            <div class="rx-filters" id="rxFilters">
+              <div class="field"><label class="field-label" for="rxInstitution">Institution</label><select class="select" id="rxInstitution" data-param="institution"><option value="">All accessible</option></select></div>
+              <div class="field"><label class="field-label" for="rxCategory">Issue type</label><select class="select" id="rxCategory" data-param="category"><option value="">All issue types</option></select></div>
+              <div class="field"><label class="field-label" for="rxSeverity">Severity</label><select class="select" id="rxSeverity" data-param="severity"><option value="">All severities</option></select></div>
+              <div class="field"><label class="field-label" for="rxStatus">Review status</label><select class="select" id="rxStatus" data-param="status"><option value="">All statuses</option></select></div>
+              <div class="field"><label class="field-label" for="rxSession">Academic session</label><select class="select" id="rxSession" data-param="session"><option value="">All sessions</option></select></div>
+              <div class="field"><label class="field-label" for="rxBatch">Import batch / file</label><select class="select" id="rxBatch" data-param="batch"><option value="">All batches and files</option></select></div>
+              <div class="field"><label class="field-label" for="rxLifecycle">Lifecycle</label><select class="select" id="rxLifecycle" data-param="lifecycle"><option value="">Current (actionable)</option><option value="historical">Historical</option><option value="all">Current and historical</option></select></div>
+            </div>
+            <div class="rx-active" id="rxActive" hidden>
+              <span class="rx-active-label">Active:</span>
+              <div class="chips" id="rxChips"></div>
+              <button type="button" class="link-btn" id="rxClearAll">Clear all filters</button>
+            </div>
+          </div>
+
+          <div class="rx-summary" id="rxSummary" role="status" aria-live="polite"></div>
+
+          <div class="card table-card">
+            <div class="table-scroll">
+              <table class="data-table stackable" id="rxTable">
+                <caption class="sr-only">Reconciliation findings. Column headers with buttons can be sorted.</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" data-sort="title"><button type="button" class="sort-btn">Finding<svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg></button></th>
+                    <th scope="col" data-sort="student"><button type="button" class="sort-btn">Student / record<svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg></button></th>
+                    <th scope="col" data-sort="institution"><button type="button" class="sort-btn">Institution<svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg></button></th>
+                    <th scope="col" class="col-hide-md" data-sort="category"><button type="button" class="sort-btn">Issue type<svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg></button></th>
+                    <th scope="col" data-sort="severity"><button type="button" class="sort-btn">Severity<svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg></button></th>
+                    <th scope="col" data-sort="status"><button type="button" class="sort-btn">Review status<svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg></button></th>
+                    <th scope="col" class="col-hide-md" data-sort="source"><button type="button" class="sort-btn">Source<svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg></button></th>
+                    <th scope="col" class="col-actions"><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody id="rxRows"></tbody>
+              </table>
+            </div>
+            <div class="table-foot" id="rxPager" hidden></div>
+          </div>
+        </section>
+
+        <!-- ── Integrity Graph ──────────────────── -->
+        <section class="view" id="view-graph" data-view="graph" aria-labelledby="h-graph" hidden>
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Integrity graph</p>
+              <h1 class="page-title" id="h-graph" tabindex="-1">Student Integrity Graph</h1>
+              <p class="page-sub">Institutions, source records and the persisted findings that link them. Nothing here is inferred for display — every edge is backed by a finding or a source assignment.</p>
+            </div>
+          </div>
+
+          <div class="card graph-toolbar">
+            <form class="field" id="gSearchForm" role="search">
+              <label class="field-label" for="gQuery">Search graph</label>
+              <div class="search-field">
+                <svg class="icon icon-sm" aria-hidden="true"><use href="#i-search"/></svg>
+                <input class="input" id="gQuery" type="search" placeholder="Student, institution, row, finding…" autocomplete="off">
+                <button type="button" class="icon-btn icon-btn-sm search-clear" id="gClearQuery" aria-label="Clear graph search" hidden>
+                  <svg class="icon icon-sm" aria-hidden="true"><use href="#i-x"/></svg>
+                </button>
+              </div>
+            </form>
+            <div class="field"><label class="field-label" for="gInstitution">Institution</label><select class="select" id="gInstitution"><option value="">All accessible</option></select></div>
+            <div class="field"><label class="field-label" for="gRelationship">Relationship</label>
+              <select class="select" id="gRelationship">
+                <option value="">All relationships</option>
+                <option value="exact">Exact identifier match</option>
+                <option value="candidate">Candidate match</option>
+                <option value="conflict">Identity conflict</option>
+              </select>
+            </div>
+            <div class="field"><label class="field-label" for="gStatus">Finding status</label>
+              <select class="select" id="gStatus">
+                <option value="">All statuses</option>
+                <option value="pending">Pending review</option>
+                <option value="awaiting_verification">Awaiting verification</option>
+                <option value="resolved">Resolved</option>
+              </select>
+            </div>
+            <div class="segmented" role="group" aria-label="Graph presentation">
+              <button type="button" id="gModeGraph" aria-pressed="true"><svg class="icon" aria-hidden="true"><use href="#i-graph"/></svg>Graph</button>
+              <button type="button" id="gModeTable" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-table"/></svg>Table</button>
+            </div>
+          </div>
+
+          <div class="graph-layout">
+            <section class="card graph-stage" aria-label="Relationship view">
+              <div class="graph-stage-head">
+                <p class="graph-stats" id="gStats" role="status" aria-live="polite">Loading…</p>
+                <div class="zoom" id="gZoom">
+                  <button type="button" class="icon-btn icon-btn-sm" id="gZoomOut" aria-label="Zoom out"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-zoom-out"/></svg></button>
+                  <span id="gZoomLevel" aria-live="polite">100%</span>
+                  <button type="button" class="icon-btn icon-btn-sm" id="gZoomIn" aria-label="Zoom in"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-zoom-in"/></svg></button>
+                  <button type="button" class="btn btn-ghost btn-xs" id="gReset"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-frame"/></svg>Reset view</button>
+                </div>
+              </div>
+              <div class="g-sim-bar" id="gSimBar" role="status" hidden>
+                <p class="g-sim-text"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-flask"/></svg><span><strong>SIMULATION ONLY — NO AUTHORITATIVE RECORD CHANGED.</strong> Dashed violet lines are hypothetical; nothing here is a recorded link or decision.</span></p>
+                <div class="g-sim-actions">
+                  <button type="button" class="btn btn-secondary btn-xs" id="gSimBack"><svg class="icon icon-xs" aria-hidden="true"><use href="#i-arrow-left"/></svg>Back to the lab</button>
+                  <button type="button" class="btn btn-primary btn-xs" id="gSimExit"><svg class="icon icon-xs" aria-hidden="true"><use href="#i-x"/></svg>Return to the authoritative graph</button>
+                </div>
+              </div>
+              <div class="graph-canvas" id="gCanvas"></div>
+              <div class="table-scroll" id="gTableWrap" hidden></div>
+              <div class="legend" id="gLegend" aria-label="Legend"></div>
+            </section>
+            <aside class="card graph-panel" id="gPanel" aria-label="Evidence panel" aria-live="polite"></aside>
+          </div>
+          <section class="card g-history" id="gHistory" aria-label="Student history" hidden></section>
+        </section>
+
+        <!-- ── Audit History ────────────────────── -->
+        <!-- ── Potential matches ────────────────── -->
+        <section class="view" id="view-matches" data-view="matches" aria-labelledby="h-matches" hidden>
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Identity resolution</p>
+              <h1 class="page-title" id="h-matches" tabindex="-1">Potential matches</h1>
+              <p class="page-sub">Pairs of source records that may describe the same student. Compare them field by field, inspect the sources and record a justified decision. Nothing is merged automatically.</p>
+            </div>
+          </div>
+          <div class="mx-layout" id="mxLayout">
+            <section class="card mx-queue" aria-labelledby="h-mx-queue">
+              <div class="mx-queue-head">
+                <h2 class="card-title" id="h-mx-queue">Review queue</h2>
+                <form class="mx-search" id="mxSearchForm" role="search">
+                  <label class="sr-only" for="mxQuery">Search potential matches</label>
+                  <svg class="icon icon-sm" aria-hidden="true"><use href="#i-search"/></svg>
+                  <input class="input" id="mxQuery" type="search" placeholder="Name, institution, file or row…" autocomplete="off">
+                  <button type="button" class="icon-btn icon-btn-sm search-clear" id="mxClearQuery" aria-label="Clear search" hidden><svg class="icon icon-sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+                </form>
+                <button type="button" class="btn btn-secondary btn-sm mx-filter-btn" id="mxFilterBtn" aria-haspopup="dialog"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg>Filters <span class="count-pill" id="mxFilterCount" hidden></span></button>
+              </div>
+              <div class="mx-filters" id="mxFilters">
+                <div class="field"><label class="field-label" for="mxInstitution">Institution</label><select class="select" id="mxInstitution" data-param="institution"><option value="">All accessible</option></select></div>
+                <div class="field"><label class="field-label" for="mxStatus">Review status</label><select class="select" id="mxStatus" data-param="status"><option value="">All statuses</option></select></div>
+                <div class="field"><label class="field-label" for="mxConflict">Conflict</label><select class="select" id="mxConflict" data-param="conflict"><option value="">Any</option></select></div>
+                <div class="field"><label class="field-label" for="mxEvidence">Matching evidence</label><select class="select" id="mxEvidence" data-param="evidence"><option value="">Any</option></select></div>
+                <div class="field"><label class="field-label" for="mxMethod">Method</label><select class="select" id="mxMethod" data-param="method"><option value="">Any method</option></select></div>
+                <div class="field"><label class="field-label" for="mxSession">Academic session</label><select class="select" id="mxSession" data-param="session"><option value="">Any session</option></select></div>
+              </div>
+              <div class="chips mx-chips" id="mxChips" aria-label="Active filters"></div>
+              <p class="mx-count" id="mxCount" role="status" aria-live="polite"></p>
+              <ul class="mx-list" id="mxList" aria-labelledby="h-mx-queue"></ul>
+            </section>
+            <section class="mx-detail" id="mxDetail" aria-label="Comparison" tabindex="-1"></section>
+          </div>
+        </section>
+
+        <!-- ── Source profile ──────────────────── -->
+        <section class="view" id="view-profile" data-view="profile" aria-labelledby="h-profile" hidden>
+          <div class="page-head">
+            <div>
+              <a class="link-btn back-link" href="#/matches" id="pfBack"><svg class="icon icon-xs" aria-hidden="true"><use href="#i-arrow-left"/></svg>Back</a>
+              <p class="eyebrow">Student profile · source view</p>
+              <h1 class="page-title" id="h-profile" tabindex="-1">Student profile</h1>
+              <p class="page-sub" id="pfSub">Source records joined only by an automatic identifier link or a user decision. Nothing is merged or overwritten.</p>
+            </div>
+          </div>
+          <div id="pfBody" aria-live="polite"></div>
+        </section>
+
+        <section class="view" id="view-audit" data-view="audit" aria-labelledby="h-audit" hidden>
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Audit history</p>
+              <h1 class="page-title" id="h-audit" tabindex="-1">Audit history</h1>
+              <p class="page-sub" id="auditSub">Every user decision and import batch in your access scope, exactly as persisted in the local demo database.</p>
+            </div>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Audit records">
+            <button type="button" class="tab" role="tab" id="tab-decisions" aria-controls="panel-decisions" aria-selected="true">Decisions &amp; lifecycle <span class="count-pill" id="auditDecisionCount">–</span></button>
+            <button type="button" class="tab" role="tab" id="tab-imports" aria-controls="panel-imports" aria-selected="false" tabindex="-1">Import batches <span class="count-pill" id="auditImportCount">–</span></button>
+          </div>
+          <section class="card table-card" role="tabpanel" id="panel-decisions" aria-labelledby="tab-decisions" tabindex="0"></section>
+          <section class="card table-card" role="tabpanel" id="panel-imports" aria-labelledby="tab-imports" tabindex="0" hidden></section>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- Finding detail drawer -->
+  <dialog class="drawer" id="findingDrawer" aria-labelledby="drawerTitle">
+    <div id="drawerInner" style="display:contents"></div>
+  </dialog>
+
+  <!-- Mobile filter drawer (filled with #rxFilters while open) -->
+  <dialog class="sheet" id="rxFilterSheet" aria-labelledby="rxSheetTitle">
+    <div class="sheet-head">
+      <h2 id="rxSheetTitle">Filter findings</h2>
+      <button type="button" class="icon-btn" id="rxSheetClose" aria-label="Close filters"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="sheet-body" id="rxSheetBody"></div>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" id="rxSheetClear">Clear filters</button>
+      <button type="button" class="btn btn-primary" id="rxSheetDone">Show results</button>
+    </div>
+  </dialog>
+
+  <!-- Mobile filter drawer for potential matches (filled with #mxFilters while open) -->
+  <dialog class="sheet" id="mxFilterSheet" aria-labelledby="mxSheetTitle">
+    <div class="sheet-head">
+      <h2 id="mxSheetTitle">Filter potential matches</h2>
+      <button type="button" class="icon-btn" id="mxSheetClose" aria-label="Close filters"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="sheet-body" id="mxSheetBody"></div>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" id="mxSheetClear">Clear filters</button>
+      <button type="button" class="btn btn-primary" id="mxSheetDone">Show results</button>
+    </div>
+  </dialog>
+
+  <!-- Source-record detail (opened from the graph and the student history) -->
+  <dialog class="modal record-dialog" id="recordDialog" aria-labelledby="recordDialogTitle">
+    <div class="record-dialog-inner">
+      <div class="record-dialog-head"><h2 id="recordDialogTitle">Source record</h2>
+        <button type="button" class="icon-btn" id="recordDialogClose" aria-label="Close source record"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <div id="recordDialogBody" aria-live="polite"></div>
+    </div>
+  </dialog>
+
+  <!-- Local sign-in (shown only when the server uses local accounts) -->
+  <dialog class="modal login-dialog" id="loginDialog" aria-labelledby="loginTitle" aria-describedby="loginIntro">
+    <form class="modal-inner" id="loginForm" novalidate>
+      <h2 id="loginTitle">Sign in to EduTrace</h2>
+      <p class="modal-body" id="loginIntro">Use your EduTrace account. Your role and institution come from the account on the server.</p>
+      <div class="field"><label class="field-label" for="loginUser">Username</label><input class="input" id="loginUser" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+      <div class="field"><label class="field-label" for="loginPass">Password</label><div class="password-control"><input class="input" id="loginPass" type="password" autocomplete="current-password" required><button type="button" class="btn btn-secondary btn-sm password-toggle" data-password-toggle="loginPass" aria-controls="loginPass" aria-pressed="false">Show</button></div></div>
+      <p class="field-error" id="loginError" role="alert" hidden></p>
+      <div class="modal-actions"><button type="submit" class="btn btn-primary" id="loginSubmit">Sign in</button></div>
+      <button type="button" class="registration-link" id="openRegistration" hidden>New user? Create account</button>
+      <button type="button" class="entry-back-link" id="loginEntryBack" hidden>Back to mode selection</button>
+    </form>
+  </dialog>
+
+  <dialog class="modal registration-dialog" id="registrationDialog" aria-labelledby="registrationTitle" aria-describedby="registrationIntro">
+    <form class="modal-inner" id="registrationForm" novalidate>
+      <h2 id="registrationTitle">Create account</h2>
+      <p class="modal-body" id="registrationIntro">Create your account for the read-only synthetic demo. Your access is limited to one institution.</p>
+      <div class="field"><label class="field-label" for="registrationInstitution">Institution</label><select class="select" id="registrationInstitution" required><option value="">Loading institutions…</option></select></div>
+      <div class="field"><label class="field-label" for="registrationName">Full name</label><input class="input" id="registrationName" autocomplete="name" maxlength="120" required></div>
+      <div class="field"><label class="field-label" for="registrationUser">Username</label><input class="input" id="registrationUser" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required></div>
+      <div class="field"><label class="field-label" for="registrationPass">Password</label><div class="password-control"><input class="input" id="registrationPass" type="password" autocomplete="new-password" minlength="12" maxlength="256" required><button type="button" class="btn btn-secondary btn-sm password-toggle" data-password-toggle="registrationPass" aria-controls="registrationPass" aria-pressed="false">Show</button></div></div>
+      <div class="field"><label class="field-label" for="registrationConfirm">Confirm password</label><div class="password-control"><input class="input" id="registrationConfirm" type="password" autocomplete="new-password" minlength="12" maxlength="256" required><button type="button" class="btn btn-secondary btn-sm password-toggle" data-password-toggle="registrationConfirm" aria-controls="registrationConfirm" aria-pressed="false">Show</button></div></div>
+      <p class="field-error" id="registrationError" role="alert" hidden></p>
+      <div class="modal-actions registration-actions"><button type="button" class="btn btn-secondary" id="registrationBack">Back to sign in</button><button type="submit" class="btn btn-primary" id="registrationSubmit">Create account</button></div>
+    </form>
+  </dialog>
+
+  <!-- Evidence Impact Lab (opened from a finding or a potential match) -->
+  <dialog class="modal record-dialog lab-dialog" id="labDialog" aria-labelledby="labTitle">
+    <div class="record-dialog-inner">
+      <p class="lab-sim-label" role="note"><svg class="icon icon-xs" aria-hidden="true"><use href="#i-flask"/></svg>SIMULATION ONLY — NO AUTHORITATIVE RECORD CHANGED</p>
+      <div class="record-dialog-head"><h2 id="labTitle" tabindex="-1">Evidence Impact Lab</h2>
+        <button type="button" class="icon-btn" id="labClose" aria-label="Close the Evidence Impact Lab and discard the simulation"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <div id="labBody" aria-live="polite"></div>
+    </div>
+  </dialog>
+
+  <!-- Decision receipt -->
+  <dialog class="modal record-dialog" id="receiptDialog" aria-labelledby="receiptTitle">
+    <div class="record-dialog-inner">
+      <div class="record-dialog-head"><h2 id="receiptTitle">Decision receipt</h2>
+        <button type="button" class="icon-btn" id="receiptClose" aria-label="Close the decision receipt"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <div id="receiptBody" aria-live="polite"></div>
+    </div>
+  </dialog>
+
+  <!-- Confirmation dialog -->
+  <dialog class="modal" id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+    <form method="dialog" class="modal-inner">
+      <div class="modal-icon" id="confirmIcon"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-alert-triangle"/></svg></div>
+      <h2 id="confirmTitle">Confirm</h2>
+      <div class="modal-body" id="confirmBody"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" value="cancel" id="confirmCancel">Cancel</button>
+        <button class="btn btn-primary" value="confirm" id="confirmOk">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-relevant="additions"></div>
+
+  <script src="app.js"></script>
+  <script src="reconciliation.js"></script>
+  <script src="import.js"></script>
+  <script src="graph.js"></script>
+  <script src="history.js"></script>
+  <script src="matches.js"></script>
+  <script src="profile.js"></script>
+  <script src="lab.js"></script>
+</body>
+</html>

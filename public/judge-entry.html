@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#3A0F34">
+  <title>EduTrace AI · Enrolment integrity</title>
+  <style>
+    :root{color-scheme:light;--brand:#3A0F34;--accent:#EAAA00;--bg:#DDE3E8;--surface:#fff;--text:#142D43;--muted:#44535F;--border:#DCE5EC;--info:#24557A;font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;min-height:100dvh;background:radial-gradient(ellipse at 50% 0%,#F1E8EF,transparent 58%),var(--bg);color:var(--text)}
+    main{width:min(960px,calc(100% - 40px));margin:0 auto;padding:clamp(28px,7vh,64px) 0 48px}
+    .brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit}.mark{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;background:var(--brand);color:#fff;font-weight:800}.brand strong{display:block;font-size:17px}.brand small{display:block;color:var(--muted);font-size:12px}
+    .eyebrow{margin:clamp(38px,8vh,72px) 0 8px;color:var(--info);font-size:12px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}h1{margin:0;font-size:clamp(32px,5vw,48px);line-height:1.08;letter-spacing:-.04em}.intro{max-width:620px;margin:14px 0 30px;color:var(--muted);font-size:16px}
+    .choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.choice{display:flex;min-height:290px;flex-direction:column;align-items:flex-start;padding:clamp(20px,3vw,28px);border:1px solid var(--border);border-radius:18px;background:var(--surface);box-shadow:0 1px 3px #2A0A261F}.choice.test{border-color:#CADCEB}.icon{display:grid;width:42px;height:42px;place-items:center;border-radius:12px;background:#F1E8EF;color:var(--brand);font-size:25px;font-weight:700}.test .icon{background:#EAF2F9;color:var(--info)}h2{margin:18px 0 8px;font-size:20px}.choice p{margin:0;color:var(--muted)}.safety{margin:16px 0 20px!important;font-size:13px}.safety strong{color:var(--text)}
+    a.button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;margin-top:auto;padding:9px 16px;border:1px solid var(--brand);border-radius:9px;background:var(--brand);color:#fff;font-weight:700;text-decoration:none}a.button:hover{background:#5A1E51}a.button:focus-visible{outline:3px solid #2F6690;outline-offset:3px}a.button:active{transform:translateY(1px)}
+    @media(max-width:680px){main{width:calc(100% - 32px);padding-top:24px}.choices{grid-template-columns:1fr}.choice{min-height:0}.eyebrow{margin-top:42px}}
+  </style>
+</head>
+<body>
+  <main>
+    <a class="brand" href="/" aria-label="EduTrace AI entry page"><span class="mark" aria-hidden="true">E</span><span><strong>EduTrace AI</strong><small>Enrolment integrity</small></span></a>
+    <p class="eyebrow">Choose your workspace</p>
+    <h1>Welcome to EduTrace AI</h1>
+    <p class="intro">Explore the read-only demo or test CSV imports in a separate, isolated synthetic workspace.</p>
+    <div class="choices">
+      <article class="choice">
+        <span class="icon" aria-hidden="true">◎</span><h2>Demo Mode</h2>
+        <p>Explore synthetic enrolment records, findings and reconciliation results in a read-only environment.</p>
+        <p class="safety"><strong>Safety:</strong> Read-only synthetic data.</p>
+        <a class="button" href="/demo/">Continue to Demo Login</a>
+      </article>
+      <article class="choice test">
+        <span class="icon" aria-hidden="true">⌁</span><h2>Synthetic Test Mode</h2>
+        <p>Test CSV uploads, column mapping, validation and institution-scoped reconciliation using generated synthetic data. Changes are temporary and discarded on restart.</p>
+        <p class="safety"><strong>Safety:</strong> Temporary data; imports are allowed only in the isolated test workspace.</p>
+        <a class="button" href="/synthetic/">Enter Synthetic Test Workspace</a>
+      </article>
+    </div>
+  </main>
+</body>
+</html>

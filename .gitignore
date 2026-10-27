@@ -1,0 +1,36 @@
+# Secrets — never commit. key.txt may hold a live provider key: rotate it, then delete it.
+key.txt
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+
+# Runtime data — the demo database is rebuilt from src/seed.js; backups live outside the project
+data/demo-db.json
+data/*.tmp
+# Local accounts (password hashes); created by `npm run user -- add`
+data/users.json
+*.tmp
+
+# Local tooling and artefacts
+node_modules/
+.playwright-cli/
+*.log
+
+# Local data and backups � never upload
+data/
+backups/
+
+# Dependencies and generated artifacts
+node_modules/
+coverage/
+dist/
+build/
+test-support/node-compile-cache/
+
+# Local credentials and environment files
+key.txt
+.env
+.env.*
+!.env.example
