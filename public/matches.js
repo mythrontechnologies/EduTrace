@@ -37,6 +37,9 @@ const MX_METHOD = { protected_identifier_exact: 'Shared identifier', name_dob_si
 const MX_RESOLUTION_TONE = { AUTO_MATCHED: 'st-resolved', POTENTIAL_MATCH: 'st-pending', MATCH_WITHDRAWN: 'tone-danger', SAME_PERSON_CONFIRMED: 'st-resolved', DIFFERENT_PERSON: 'st-resolved', NEEDS_MORE_EVIDENCE: 'st-awaiting_verification', INSUFFICIENT_EVIDENCE: 'tone-neutral', NO_SUPPORTED_MATCH: 'tone-neutral' };
 const MX_FACTOR = { agree: 'Agrees', exact: 'Identical', equivalent: 'Equivalent', similar: 'Similar', conflict: 'Conflicts', missing: 'Missing', not_usable: 'Not usable' };
 const mxStatusBadge = status => { const m = MX_STATUS[status] || { label: status, icon: 'info', cls: 'tone-neutral' }; return `<span class="badge ${m.cls}">${icon(m.icon)}${esc(m.label)}</span>`; };
+const mxQueueStatusBadge = status => state.auth === 'hosted_demo'
+  ? `<span class="badge tone-neutral">${icon('git-merge')}Potential match</span>`
+  : mxStatusBadge(status || 'Unknown status');
 const mxMethodBadge = (kind, label) => `<span class="method-chip ${kind === 'exact' ? 'is-exact' : 'is-similarity'}">${icon(kind === 'exact' ? 'shield' : 'scale', 'icon-xs')}${esc(label)}</span>`;
 const mxSourceLine = sources => sources.map(s => `${esc(s.institution_code)} · row ${esc(s.source_row)}`).join(' <span aria-hidden="true">↔</span><span class="sr-only"> and </span> ');
 const mxFieldTags = m => [
@@ -50,6 +53,7 @@ registerView('matches', {
   enter(params) {
     mxBind();
     MX_PARAMS.forEach(key => {
+      if (state.auth === 'hosted_demo' && key === 'status') return;
       const value = params.get(key) || '';
       if (key === 'q') { $('#mxQuery').value = value; $('#mxClearQuery').hidden = !value; }
       else { const select = $(`#mxFilters [data-param="${key}"]`); if (select) select.dataset.pending = value; if (select) select.value = value; }
@@ -64,7 +68,10 @@ function mxParams() {
   const params = {};
   const q = $('#mxQuery').value.trim();
   if (q) params.q = q;
-  $$('#mxFilters [data-param]').forEach(select => { if (select.value) params[select.dataset.param] = select.value; });
+  $$('#mxFilters [data-param]').forEach(select => {
+    if (state.auth === 'hosted_demo' && select.dataset.param === 'status') return;
+    if (select.value) params[select.dataset.param] = select.value;
+  });
   return params;
 }
 function mxSyncUrl() { replaceRoute('matches', { ...mxParams(), ...(mx.selected ? { match: mx.selected } : {}) }); }
@@ -149,30 +156,46 @@ async function mxLoadList() {
     return;
   }
   if (token !== mx.listToken) return;
-  list.removeAttribute('aria-busy');
-  mx.data = response;
-  refreshMatchCount(response.counts);
-  mxFillFilters(response.filter_options);
-  mxRenderChips();
-  mxRenderList();
-  if (mx.selected && !response.data.some(m => m.id === mx.selected) && !mx.detail) mx.selected = mx.selected; /* keep a deep link: the detail request decides */
-  if (!mx.selected && !MX_NARROW.matches && response.data.length) mx.selected = response.data[0].id;
-  if (mx.selected) mxLoadDetail(mx.selected);
-  else mxRenderDetail();
-  mxLayoutMode();
+  try {
+    mx.data = response;
+    refreshMatchCount(response.counts);
+    mxFillFilters(response.filter_options);
+    mxRenderChips();
+    mxRenderList();
+    if (mx.selected && !response.data.some(m => m.id === mx.selected) && !mx.detail) mx.selected = mx.selected; /* keep a deep link: the detail request decides */
+    if (!mx.selected && !MX_NARROW.matches && response.data.length) mx.selected = response.data[0].id;
+    if (mx.selected) mxLoadDetail(mx.selected);
+    else mxRenderDetail();
+    mxLayoutMode();
+  } catch {
+    if (token !== mx.listToken) return;
+    mx.data = null;
+    list.innerHTML = `<li>${errorState('Potential matches could not be displayed. Reload the list to try again.', 'data-retry-matches')}</li>`;
+    $('#mxCount').textContent = '';
+    $('[data-retry-matches]')?.addEventListener('click', mxLoadList);
+    $('#mxDetail').removeAttribute('aria-busy');
+    $('#mxDetail').innerHTML = '';
+  } finally {
+    if (token === mx.listToken) list.removeAttribute('aria-busy');
+  }
 }
 
 function mxFillFilters(options) {
+  options ||= {};
   const fill = (id, values, labelOf) => {
     const select = $(id);
     const current = select.dataset.pending ?? select.value;
     delete select.dataset.pending;
     const first = select.options[0].outerHTML;
+    values = Array.isArray(values) ? values : [];
     select.innerHTML = first + values.map(v => `<option value="${esc(v)}">${esc(labelOf(v))}</option>`).join('');
     select.value = values.includes(current) ? current : '';
   };
+  const statusField = $('#mxStatus').closest('.field');
+  statusField.hidden = state.auth === 'hosted_demo';
   fill('#mxInstitution', options.institutions, v => v);
-  fill('#mxStatus', options.statuses, v => MX_STATUS[v]?.label || v);
+  if (state.auth !== 'hosted_demo') fill('#mxStatus', options.statuses, v => MX_STATUS[v]?.label || v);
+  else { $('#mxStatus').value = ''; delete $('#mxStatus').dataset.pending; }
   fill('#mxConflict', options.conflicts, v => MX_FIELD[v] || v);
   fill('#mxEvidence', options.evidence, v => `${MX_FIELD[v] || v} agrees`);
   fill('#mxMethod', options.methods, v => MX_METHOD[v] || v);
@@ -196,11 +219,15 @@ function mxRenderChips() {
 }
 
 function mxRenderList() {
-  const { data, total, counts } = mx.data;
+  const { data, total, counts = {} } = mx.data;
+  const hostedViewer = state.auth === 'hosted_demo';
   const filtered = Object.keys(mxParams()).length > 0;
-  $('#mxCount').textContent = total
-    ? `${filtered ? `${plural(data.length, 'match', 'matches')} shown of ${total}` : plural(total, 'potential match', 'potential matches')} · ${counts.needs_review} need review${counts.needs_more_evidence ? `, ${counts.needs_more_evidence} waiting for evidence` : ''}`
+  const resultCount = total
+    ? (filtered ? `${plural(data.length, 'match', 'matches')} shown of ${total}` : plural(total, 'potential match', 'potential matches'))
     : '';
+  $('#mxCount').textContent = hostedViewer || !resultCount
+    ? resultCount
+    : `${resultCount} · ${counts.needs_review ?? 0} need review${counts.needs_more_evidence ? `, ${counts.needs_more_evidence} waiting for evidence` : ''}`;
   if (!total) {
     $('#mxList').innerHTML = `<li>${emptyState({ iconName: 'check-circle', title: 'No potential matches need review', text: 'A pair appears here when two source records in your scope share an identifier but disagree on name or date of birth, or have no shared identifier but a matching date of birth and similar names. Nothing in your current data meets either condition.', action: '<a class="btn btn-secondary btn-sm" href="#/import">Import student data</a>' })}</li>`;
     return;
@@ -213,7 +240,7 @@ function mxRenderList() {
   $('#mxList').innerHTML = data.map(m => `
     <li>
       <button type="button" class="mx-item${m.id === mx.selected ? ' is-selected' : ''}" data-match="${esc(m.id)}"${m.id === mx.selected ? ' aria-current="true"' : ''}>
-        <span class="mx-item-top">${m.resolution === 'MATCH_WITHDRAWN' ? `<span class="badge tone-danger">${icon('rotate')}Automatic match withdrawn</span>` : mxStatusBadge(m.status)}${mxMethodBadge(m.method_kind, MX_METHOD[m.method] || m.method)}</span>
+        <span class="mx-item-top">${hostedViewer ? mxQueueStatusBadge(m.status) : m.resolution === 'MATCH_WITHDRAWN' ? `<span class="badge tone-danger">${icon('rotate')}Automatic match withdrawn</span>` : mxQueueStatusBadge(m.status)}${mxMethodBadge(m.method_kind, MX_METHOD[m.method] || m.method)}</span>
         <span class="mx-item-label">${esc(m.display_label)}${m.copies > 1 ? ` <span class="mx-copies" title="Unchanged resubmissions of this pair, shown once">×${m.copies}</span>` : ''}</span>
         <span class="mx-item-src">${mxSourceLine(m.sources)}</span>
         <span class="mx-item-tags"><span class="ev-count">${m.matching_field_count} of 3 identity fields match</span>${mxFieldTags(m)}${m.disqualifiers.filter(x => x.code === 'competing_candidates' || x.code === 'shared_malformed_identifier').map(x => `<span class="ev-tag is-conflict">${icon('alert-triangle', 'icon-xs')}${esc(x.label)}</span>`).join('')}</span>
@@ -293,7 +320,7 @@ function mxRenderDetail() {
           <h2 class="mx-title" id="mxDetailTitle" tabindex="-1">${esc(m.display_label)}</h2>
           <p class="mx-sub">${mxSourceLine(m.sources)}${d.explanation.finding ? ` · <a href="#/reconciliation?finding=${esc(d.explanation.finding.id)}">${esc(d.explanation.finding.title)}</a>` : ''}</p>
         </div>
-        <div class="mx-head-status">${mxStatusBadge(m.status)}</div>
+        <div class="mx-head-status">${mxQueueStatusBadge(m.status)}</div>
       </header>
 
       <div class="mx-sources">
@@ -329,10 +356,10 @@ function mxRenderDetail() {
       </section>
     </div>
 
-    <section class="card mx-decide" aria-labelledby="mxDecideTitle">
+    ${state.auth !== 'hosted_demo' ? `<section class="card mx-decide" aria-labelledby="mxDecideTitle">
       <h3 id="mxDecideTitle" tabindex="-1">User decision</h3>
       ${mxDecisionPanel(d)}
-    </section>
+    </section>` : ''}
 
     <section class="card mx-lab lab-entry" aria-labelledby="mxLabTitle">
       <h3 id="mxLabTitle">${icon('flask', 'icon-sm')}Evidence Impact Lab</h3>
@@ -340,12 +367,12 @@ function mxRenderDetail() {
       <button type="button" class="btn btn-secondary btn-sm" data-lab-link="${esc(d.match.id)}">${icon('flask', 'icon-sm')}Explore impact</button>
     </section>
 
-    <section class="card mx-history" aria-labelledby="mxHistoryTitle">
+    ${state.auth !== 'hosted_demo' ? `<section class="card mx-history" aria-labelledby="mxHistoryTitle">
       <h3 id="mxHistoryTitle">Audit history for this pair</h3>
       ${d.history.length
         ? `<ol class="timeline">${d.history.map(e => `<li class="tl-item"><span class="tl-icon ${e.system ? '' : isAwaitingAction(e.action) ? 'st-awaiting_verification' : 'st-resolved'}">${icon(e.system ? 'rotate' : e.action.startsWith('match_') ? 'git-merge' : 'check')}</span><div><p class="tl-text"><strong>${esc(e.actor)}</strong> ${esc(outcomeLabel(e.action).toLowerCase())}${e.link_id && e.link_id !== m.id ? ' (another pair in this finding)' : ''}</p>${e.from_state ? `<p class="tl-meta">${esc(e.from_state.replaceAll('_', ' ').toLowerCase())} → ${esc(e.to_state.replaceAll('_', ' ').toLowerCase())}</p>` : ''}<p class="tl-meta"><time datetime="${esc(e.at)}" title="${esc(fmtDate(e.at))}">${esc(relTime(e.at))}</time></p>${e.note ? `<p class="tl-note">${esc(e.note)}</p>` : ''}${e.receipt_id && state.auth !== 'hosted_demo' ? `<button type="button" class="link-btn" data-receipt="${esc(e.receipt_id)}">${icon('shield', 'icon-xs')}Receipt</button>` : ''}</div></li>`).join('')}</ol>`
         : `<p class="muted">No decisions yet. Every decision on this pair is recorded here and in the <a href="#/audit">audit history</a>.</p>`}
-    </section>`;
+    </section>` : ''}`;
 
   $$('[data-mx-back]', panel).forEach(button => button.addEventListener('click', mxBack));
   $$('.mx-row-btn', panel).forEach(button => button.addEventListener('click', () => {

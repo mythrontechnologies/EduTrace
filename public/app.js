@@ -946,10 +946,16 @@ async function refreshPrincipal() {
 
 /* Number of potential matches still needing a reviewer, shown beside the nav item. */
 async function refreshMatchCount(counts) {
+  const badge = $('#navMatchCount');
+  if (state.auth === 'hosted_demo') {
+    badge.hidden = true;
+    badge.textContent = '';
+    badge.removeAttribute('title');
+    return;
+  }
   try {
     const data = counts || (await api('/api/v1/matches')).counts;
     const open = data.needs_review + data.needs_more_evidence;
-    const badge = $('#navMatchCount');
     badge.hidden = !open;
     badge.textContent = open;
     badge.title = `${plural(open, 'potential match', 'potential matches')} awaiting a decision`;
