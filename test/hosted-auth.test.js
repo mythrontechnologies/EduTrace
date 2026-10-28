@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const { createApp, hostedDemoResponse } = require('../server');
 const { createDemoStore } = require('../src/demo-data');
 const { createProvider } = require('../src/ai-provider');
@@ -533,6 +534,42 @@ test('authorized non-hosted findings status filtering and dashboard aggregates r
     assert.ok(resolved.data.every(finding => finding.review_status === 'resolved'));
     assert.ok(Object.hasOwn(resolved.filter_options, 'statuses'));
   } finally { await new Promise(resolve => app.close(resolve)); }
+});
+
+test('hosted finding details retain synthetic evidence when projected audit history is absent', async () => {
+  await withHostedServer(async ({ base }) => {
+    const login = await fetch(`${base}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ password: TEST_PASSWORD })
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+
+    const listResponse = await fetch(`${base}/api/v1/findings`, { headers: { cookie } });
+    assert.equal(listResponse.status, 200);
+    const list = await listResponse.json();
+    const listedFinding = list.data.find(finding => finding.records?.length > 0);
+    assert.ok(listedFinding, 'hosted reconciliation exposes synthetic findings with source evidence');
+
+    const detailResponse = await fetch(`${base}/api/v1/findings/${encodeURIComponent(listedFinding.id)}`, { headers: { cookie } });
+    assert.equal(detailResponse.status, 200);
+    const detail = await detailResponse.json();
+    assert.equal(detail.data.id, listedFinding.id);
+    assert.ok(Array.isArray(detail.data.records));
+    assert.ok(detail.data.records.length > 0, 'detail still contains the synthetic evidence records');
+    assert.equal(Object.hasOwn(detail, 'audit'), false, 'hosted projection intentionally omits protected audit history');
+
+    const reconciliation = fs.readFileSync(require.resolve('../public/reconciliation.js'), 'utf8');
+    const historySection = reconciliation.match(/function rxHistorySection\(f, audit\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(historySection, 'review-history component exists');
+    const renderHistory = new Function('icon', 'isAwaitingAction', 'outcomeLabel', 'esc', 'fmtDate', `${historySection}; return rxHistorySection;`)(
+      () => '', () => false, action => action, value => String(value ?? ''), value => String(value ?? '')
+    );
+    assert.equal(renderHistory(detail.data, detail.audit), '', 'optional hosted audit history is omitted rather than misreported or allowed to break rendering');
+    assert.match(renderHistory(detail.data, [{ actor: 'Authorized Reviewer', action: 'approved', at: '2026-01-01' }]), /Authorized Reviewer/, 'valid history retains the existing rendering behavior');
+    assert.match(reconciliation, /const records = f\.records;/, 'the existing source evidence rendering path remains intact');
+  });
 });
 
 function hasKey(value, target) {

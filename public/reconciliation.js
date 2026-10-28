@@ -529,6 +529,9 @@ function rxProvenanceSection(f) {
 }
 
 function rxHistorySection(f, audit) {
+  // The hosted response projection deliberately omits the audit property. Keep the
+  // detail panel renderable without implying that private history was delivered.
+  if (!Array.isArray(audit)) return '';
   return `<section class="d-section"><h3>${icon('history')}Review history</h3>
     ${audit.length ? `<ol class="timeline">${[...audit].reverse().map(event => `
       <li class="tl-item">
