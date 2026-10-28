@@ -74,23 +74,49 @@ function browserHarness({ auth, response, failRendering = false }) {
   return { context, apiCalls, fields, fieldWrappers, element };
 }
 
+function renderHostedDetail(detail) {
+  const matchesSource = fs.readFileSync(require.resolve('../public/matches.js'), 'utf8');
+  const detailRenderer = matchesSource.slice(matchesSource.indexOf('function mxRenderDetail()'), matchesSource.indexOf('\nfunction mxValue('));
+  const explanationRenderer = matchesSource.slice(matchesSource.indexOf('function mxExplanation(d)'), matchesSource.indexOf('\nfunction mxAiPanel('));
+  const panel = { innerHTML: '', removeAttribute() {} };
+  const context = {
+    state: { auth: 'hosted_demo' }, mx: { detail, data: { total: 1 } }, MX_NARROW: { matches: false },
+    MX_STATE: Object.fromEntries(['agree', 'equivalent', 'similar', 'conflict', 'missing_one', 'not_comparable', 'differs'].map(key => [key, { cls: '', icon: '', label: key }])),
+    MX_RESOLUTION_TONE: {}, MX_FIELD: {}, MX_FACTOR: {},
+    $: selector => selector === '#mxDetail' ? panel : { addEventListener() {}, focus() {} }, $$: () => [],
+    icon: () => '', esc: value => String(value ?? ''), fmtDate: () => '', relTime: () => '',
+    mxLayoutMode() {}, mxQueueStatusBadge: () => '', mxMethodBadge: () => '', mxSourceLine: () => '',
+    mxFieldRow: () => '<li>field</li>', mxAiPanel: () => '<div>model commentary omitted</div>',
+    mxDecisionPanel: () => '', mxBindDecision() {}, mxAskModel() {}, routeHash: () => '#',
+    isAwaitingAction: () => false, outcomeLabel: value => value
+  };
+  vm.createContext(context);
+  vm.runInContext(`${detailRenderer}\n${explanationRenderer}\nglobalThis.renderDetail = mxRenderDetail;`, context);
+  context.renderDetail();
+  return panel.innerHTML;
+}
+
 async function withHostedApp(run) {
   const auth = hostedDemoAuthenticator({ passwordHash: TEST_HASH, secureCookies: false });
   const app = createApp({ mode: 'demo', store: createDemoStore(), auth, getProvider: () => createProvider({ env: {}, disabled: 'disabled in hosted Demo' }) });
   const login = auth.login({ headers: {}, socket: { remoteAddress: 'hosted-ui-test' } }, { password: TEST_PASSWORD });
   assert.equal(login.status, 200);
   const cookie = login.setCookie.split(';')[0];
-  const matchesResponse = await new Promise(resolve => {
+  const request = path => new Promise(resolve => {
     const request = Readable.from([]);
-    request.method = 'GET'; request.url = '/api/v1/matches'; request.headers = { host: 'localhost', cookie };
+    request.method = 'GET'; request.url = path; request.headers = { host: 'localhost', cookie };
     request.socket = { remoteAddress: 'hosted-ui-test' };
     const response = new EventEmitter(); let status = 200; let headers = {}; const chunks = [];
     response.writeHead = (code, values) => { status = code; headers = values; };
     response.end = value => { if (value) chunks.push(value); const text = chunks.join(''); resolve({ status, text, json: headers['Content-Type']?.includes('json') ? JSON.parse(text) : undefined }); };
     app.emit('request', request, response);
   });
+  const matchesResponse = await request('/api/v1/matches');
   assert.equal(matchesResponse.status, 200);
-  await run({ response: matchesResponse.json });
+  const firstMatch = matchesResponse.json.data[0];
+  const detailResponse = await request(`/api/v1/matches/${encodeURIComponent(firstMatch.id)}`);
+  assert.equal(detailResponse.status, 200);
+  await run({ response: matchesResponse.json, detail: detailResponse.json.data });
 }
 
 test('hosted-safe matches response renders through the list flow without status data or fallback count request', async () => {
@@ -111,6 +137,26 @@ test('hosted-safe matches response renders through the list flow without status 
     assert.equal(harness.apiCalls.length, 1, 'the list request is the only API request; absent counts do not trigger a fallback');
     assert.equal(harness.fieldWrappers.status.hidden, true, 'decision status filter is hidden in hosted mode');
     assert.equal(harness.fields[1].value, '', 'a stale status selection is cleared');
+  });
+});
+
+test('hosted-projected match detail renders without factors, renders present factors, and hides audit history', async () => {
+  await withHostedApp(async ({ detail }) => {
+    assert.equal(Object.hasOwn(detail, 'history'), false, 'hosted projection omits protected audit history');
+    assert.equal(Object.hasOwn(detail.explanation, 'factors'), false, 'hosted projection currently omits factors');
+
+    const withoutFactors = renderHostedDetail(detail);
+    assert.match(withoutFactors, /Field comparison/);
+    assert.match(withoutFactors, /Why these records are candidates/);
+    assert.doesNotMatch(withoutFactors, /Audit history for this pair/);
+
+    const withFactors = renderHostedDetail({
+      ...detail,
+      explanation: { ...detail.explanation, factors: [{ field: 'student_name', result: 'similar', note: 'Synthetic evidence', weight: 1 }] }
+    });
+    assert.match(withFactors, /factor-table/);
+    assert.match(withFactors, /Synthetic evidence/);
+    assert.doesNotMatch(withFactors, /Audit history for this pair/);
   });
 });
 

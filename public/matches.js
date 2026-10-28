@@ -434,7 +434,7 @@ function mxExplanation(d) {
     ${e.uncertainty ? `<div><dt>Why it is uncertain</dt><dd>${esc(e.uncertainty)}</dd></div>` : ''}
     <div><dt>Recommendation</dt><dd><strong>${esc(e.recommendation)}</strong></dd></div>
     <div><dt>Evidence score</dt><dd><span class="score-pill">${esc(e.score.value)} / ${esc(e.score.max)}</span><p class="muted">${esc(e.score.note)}</p>
-      ${e.factors.length ? `<table class="data-table compact factor-table"><caption class="sr-only">Contributing factors</caption><thead><tr><th scope="col">Field</th><th scope="col">Result</th><th scope="col">Weight</th></tr></thead><tbody>${e.factors.map(f => `<tr><td>${esc(MX_FIELD[f.field] || f.field)}</td><td title="${esc(f.note)}">${esc(MX_FACTOR[f.result] || f.result)}</td><td class="num">${f.weight > 0 ? '+' : ''}${esc(f.weight)}</td></tr>`).join('')}</tbody></table>` : ''}</dd></div>
+      ${(e.factors || []).length ? `<table class="data-table compact factor-table"><caption class="sr-only">Contributing factors</caption><thead><tr><th scope="col">Field</th><th scope="col">Result</th><th scope="col">Weight</th></tr></thead><tbody>${(e.factors || []).map(f => `<tr><td>${esc(MX_FIELD[f.field] || f.field)}</td><td title="${esc(f.note)}">${esc(MX_FACTOR[f.result] || f.result)}</td><td class="num">${f.weight > 0 ? '+' : ''}${esc(f.weight)}</td></tr>`).join('')}</tbody></table>` : ''}</dd></div>
     <div><dt>Limitations</dt><dd><ul class="mx-limits">${e.limitations.map(x => `<li>${esc(x)}</li>`).join('')}</ul></dd></div>
   </dl>
   <p class="mx-source-of-truth">${icon('info', 'icon-xs')}Produced by deterministic rules (policy ${esc(e.policy_version)}). ${esc(e.system_reason)}</p>`;
