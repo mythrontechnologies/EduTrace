@@ -209,6 +209,6 @@ function byId(list, id) {
   return entry.map.get(id);
 }
 function allowedFinding(f, db, p) { return f.evidence.every(id => { const r = byId(db.sourceRecords, id); return r && canAccess(p, r); }); }
-function canAccess(principal, record) { return principal.role === 'regulator' || record.institution_code === principal.institution_code; }
+function canAccess(principal, record) { return principal.role === 'regulator' || principal.scope === 'all' || record.institution_code === principal.institution_code; }
 function transition(current, outcome) { const allowed = ['confirmed_discrepancy', 'legitimate_exception', 'record_corrected', 'awaiting_verification', 'dismissed']; if (!allowed.includes(outcome)) throw new Error('Unsupported review outcome.'); if (current === 'resolved' && outcome !== 'awaiting_verification') throw new Error('Resolved findings may only be reopened for further verification.'); return ['confirmed_discrepancy', 'legitimate_exception', 'record_corrected', 'dismissed'].includes(outcome) ? 'resolved' : 'awaiting_verification'; }
 module.exports = { byId, VALIDATION_TITLES, GROUP_TEXT, CONCURRENT_EXPLANATION, validationExplanation, candidateExplanation, capacityExplanation, allowedFinding, isActiveRecord, APaar, REQUIRED, FIELD_DEFINITIONS, CAPACITY_RULE, SYSTEM_ACTOR, similarity, identityKey, finding, sameEvidence, mask, normaliseRecord, schemaSuggestion, validate, reconcile, canAccess, transition, fingerprint, isCurrent, capacityKey, capacityState, syncCapacityFindings, needsCapacityMigration };

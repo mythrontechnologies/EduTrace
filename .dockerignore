@@ -1,0 +1,41 @@
+# Default-deny the repository; re-include only the runtime's explicit source roots below.
+**
+!package.json
+!package-lock.json
+!server.js
+!public/
+!public/**
+!src/
+!src/**
+
+# Keep credentials, account/data files, local artifacts, and internal evaluation material out.
+**/.env*
+**/key.txt
+**/*.key
+**/*.pem
+**/users.json
+**/*.tmp
+**/*.log
+data/
+backups/
+bench/
+docs/
+test/
+test-support/
+scripts/
+node_modules/
+.git/
+.agents/
+.codex/
+coverage/
+dist/
+build/
+
+# These runtime-extraneous files contain internal evaluation logic or a local-only entry page.
+public/judge-entry.html
+src/ai-evaluation.js
+src/backup.js
+src/evaluation.js
+src/identity-benchmark.js
+src/identity-baseline.js
+src/**/identity-holdout/**

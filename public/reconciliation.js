@@ -5,6 +5,7 @@
 'use strict';
 
 const RX_PARAMS = ['q', 'institution', 'category', 'severity', 'status', 'session', 'batch', 'lifecycle'];
+const activeRxParams = () => state.auth === 'hosted_demo' ? RX_PARAMS.filter(key => key !== 'status') : RX_PARAMS;
 const RX_FILTER_LABELS = {
   institution: 'Institution',
   category: 'Issue type',
@@ -35,7 +36,7 @@ const rx = {
 /* ── Route Integration ────────────────────────── */
 registerView('reconciliation', {
   enter(params, { changed }) {
-    const filters = Object.fromEntries(RX_PARAMS.map(key => [key, params.get(key) || '']));
+    const filters = Object.fromEntries(activeRxParams().map(key => [key, params.get(key) || '']));
     const key = JSON.stringify(filters);
     rx.filters = filters;
     rxSetInputs(filters);
@@ -94,6 +95,7 @@ function rxFilterValueLabel(param, value) {
 }
 
 function rxApply(filters) {
+  filters = Object.fromEntries(activeRxParams().map(key => [key, filters[key] || '']));
   rx.filters = filters;
   rx.queryKey = JSON.stringify(filters);
   rx.page = 1;
@@ -104,7 +106,7 @@ function rxApply(filters) {
 
 function rxReadInputs() {
   const filters = { q: $('#rxQuery').value.trim() };
-  $$('#rxFilters select').forEach(select => { filters[select.dataset.param] = select.value; });
+  $$('#rxFilters select').forEach(select => { if (activeRxParams().includes(select.dataset.param)) filters[select.dataset.param] = select.value; });
   return filters;
 }
 
@@ -186,6 +188,8 @@ function rxFillSelect(select, groups) {
 }
 
 function rxPopulateFilters(options) {
+  const statusField = $('#rxStatus').parentElement;
+  statusField.hidden = state.auth === 'hosted_demo';
   rxFillSelect($('#rxInstitution'), [{ items: options.institutions.map(i => ({ value: i.code, label: `${i.code} · ${i.name}` })) }]);
   const categories = options.categories.filter(value => CATEGORY[value]);
   const rules = options.categories.filter(value => !CATEGORY[value]);
@@ -194,7 +198,7 @@ function rxPopulateFilters(options) {
     { label: 'Specific rules', items: rules.map(value => ({ value, label: ruleLabel(value) })) }
   ]);
   rxFillSelect($('#rxSeverity'), [{ items: [...options.severities].sort((a, b) => (SEVERITY[b]?.rank || 0) - (SEVERITY[a]?.rank || 0)).map(value => ({ value, label: SEVERITY[value]?.label || value })) }]);
-  rxFillSelect($('#rxStatus'), [{ items: [...options.statuses].sort((a, b) => (STATUS[a]?.rank ?? 9) - (STATUS[b]?.rank ?? 9)).map(value => ({ value, label: statusLabel(value) })) }]);
+  if (state.auth !== 'hosted_demo') rxFillSelect($('#rxStatus'), [{ items: [...options.statuses].sort((a, b) => (STATUS[a]?.rank ?? 9) - (STATUS[b]?.rank ?? 9)).map(value => ({ value, label: statusLabel(value) })) }]);
   rxFillSelect($('#rxSession'), [{ items: options.sessions.map(value => ({ value, label: value })) }]);
   rxFillSelect($('#rxBatch'), [
     { label: 'Import batches', items: options.batches.map(value => ({ value, label: rx.batches[value] ? `${rx.batches[value].source_file} · ${value}` : value })) },
@@ -204,7 +208,7 @@ function rxPopulateFilters(options) {
 }
 
 function rxRenderChips() {
-  const active = RX_PARAMS.filter(key => rx.filters[key]);
+  const active = activeRxParams().filter(key => rx.filters[key]);
   $('#rxActive').hidden = !active.length;
   $('#rxChips').innerHTML = active.map(key => {
     const label = key === 'q' ? 'Search' : RX_FILTER_LABELS[key];
@@ -219,13 +223,13 @@ function rxRenderChips() {
 
 function rxRenderSummary() {
   const res = rx.response;
-  const filtered = RX_PARAMS.some(key => rx.filters[key]);
+  const filtered = activeRxParams().some(key => rx.filters[key]);
   const sev = res.by_severity.filter(item => item.count).map(item => `<span class="badge sev-${item.severity}">${icon(SEVERITY[item.severity].icon)}${item.count} ${SEVERITY[item.severity].label.toLowerCase()}</span>`).join('');
   const scope = { current: 'current', historical: 'historical', all: 'current and historical' }[res.lifecycle] || 'current';
   const historical = res.lifecycle === 'current' && res.lifecycle_counts?.historical
     ? ` · <button type="button" class="link-btn" data-lifecycle="historical">View ${plural(res.lifecycle_counts.historical, 'historical finding')}</button>` : '';
   $('#rxSummary').innerHTML = `
-    <span>${filtered && RX_PARAMS.some(key => key !== 'lifecycle' && rx.filters[key])
+    <span>${filtered && activeRxParams().some(key => key !== 'lifecycle' && rx.filters[key])
       ? `<strong>${res.total}</strong> of <strong>${res.accessible_total}</strong> ${scope} ${res.accessible_total === 1 ? 'finding matches' : 'findings match'} your search and filters`
       : `<strong>${res.total}</strong> ${scope} ${res.total === 1 ? 'finding' : 'findings'} in your scope`}${historical}</span>
     <span class="rx-sevsum">${sev}</span>`;
@@ -319,7 +323,7 @@ function rxRenderRows() {
   });
 
   if (!data.length) {
-    const filtered = RX_PARAMS.some(key => rx.filters[key]);
+    const filtered = activeRxParams().some(key => rx.filters[key]);
     $('#rxRows').innerHTML = `<tr><td colspan="8">${filtered
       ? emptyState({ iconName: 'search', title: 'No findings match this search and filter combination', text: 'Try a shorter search term, remove a filter, or clear everything to see all accessible findings.', action: '<button type="button" class="btn btn-secondary btn-sm" data-clear-all>Clear all filters</button>' })
       : emptyState({ iconName: 'check-circle', title: 'No findings in your access scope', text: 'Reconciliation has not produced any findings for the records you can access.', action: '<a class="btn btn-primary btn-sm" href="#/import">Import student data</a>' })}</td></tr>`;
@@ -360,7 +364,7 @@ function rxRenderRows() {
 }
 
 function rxClearAll() {
-  rxApply(Object.fromEntries(RX_PARAMS.map(key => [key, ''])));
+  rxApply(Object.fromEntries(activeRxParams().map(key => [key, ''])));
   $('#rxQuery').focus();
 }
 
@@ -533,7 +537,7 @@ function rxHistorySection(f, audit) {
           <p class="tl-text"><strong>${esc(event.actor)}</strong> recorded <strong>${esc(outcomeLabel(event.action))}</strong></p>
           <p class="tl-meta"><time datetime="${esc(event.at)}">${esc(fmtDate(event.at))}</time></p>
           ${event.note ? `<p class="tl-note">${esc(event.note)}</p>` : ''}
-          ${event.receipt_id ? `<button type="button" class="link-btn" data-receipt="${esc(event.receipt_id)}">${icon('shield', 'icon-xs')}View decision receipt</button>` : ''}
+          ${event.receipt_id && state.auth !== 'hosted_demo' ? `<button type="button" class="link-btn" data-receipt="${esc(event.receipt_id)}">${icon('shield', 'icon-xs')}View decision receipt</button>` : ''}
         </div>
       </li>`).join('')}</ol>`
       : '<p class="muted" style="font-size:13px">No decision has been recorded yet. Detected by the reconciliation engine on ' + esc(fmtDate(f.created_at)) + '.</p>'}
@@ -884,7 +888,7 @@ rxSheet.addEventListener('close', () => {
 });
 rxSheet.addEventListener('click', event => {
   if (event.target.closest('#rxSheetClose, #rxSheetDone') || event.target === rxSheet) rxSheet.close();
-  if (event.target.closest('#rxSheetClear')) rxApply({ ...Object.fromEntries(RX_PARAMS.map(key => [key, ''])), q: rx.filters.q });
+  if (event.target.closest('#rxSheetClear')) rxApply({ ...Object.fromEntries(activeRxParams().map(key => [key, ''])), q: rx.filters.q });
 });
 mobileQuery.addEventListener('change', () => { if (!mobileQuery.matches && rxSheet.open) rxSheet.close(); });
 

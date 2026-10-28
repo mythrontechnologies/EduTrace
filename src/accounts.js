@@ -10,12 +10,16 @@
 // * Repeated failures lock sign-in for that username and for that client address for 15 minutes.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const { AuthError, ROLES, principalOf } = require('./auth');
+const { AuthError, principalOf } = require('./auth');
+
+// This server-owned role is selected only by hosted Demo authentication; it is not an account role.
+const ACCOUNT_ROLES = Object.freeze(['reviewer', 'auditor', 'institution_admin', 'platform_admin']);
 
 const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const COOKIE = 'edutrace_session';
 const LIMITS = { idleMs: 30 * 60000, absoluteMs: 8 * 3600000, failures: 5, lockMs: 15 * 60000 };
 const USERNAME = /^[a-z0-9._-]{3,64}$/;
+const HOSTED_LOGIN_LIMIT = Object.freeze({ windowMs: 15 * 60 * 1000, failures: 5 });
 
 function hashPassword(password) {
   if (typeof password !== 'string' || password.length < 12 || password.length > 256) throw new Error('A password must be 12 to 256 characters.');
@@ -34,7 +38,7 @@ function verifyPassword(password, stored) {
 
 function validateAccount(a) {
   if (!USERNAME.test(a.username || '')) throw new Error('A username is 3–64 lower-case letters, digits, dots, hyphens or underscores.');
-  if (!ROLES[a.role]) throw new Error(`The role must be one of: ${Object.keys(ROLES).join(', ')}.`);
+  if (!ACCOUNT_ROLES.includes(a.role)) throw new Error(`The role must be one of: ${ACCOUNT_ROLES.join(', ')}.`);
   if (a.institution_code !== null && !/^[A-Z0-9]{2,12}$/.test(a.institution_code || '')) throw new Error('institution_code is an institution code, or null for cross-institution (regulator) scope.');
   if (a.role === 'institution_admin' && a.institution_code === null) throw new Error('An institution administrator belongs to one institution.');
   if (!String(a.display_name || '').trim()) throw new Error('A display name is required.');
@@ -120,4 +124,69 @@ function localSessionAuthenticator({ directory, now = () => Date.now(), secureCo
   };
 }
 
-module.exports = { COOKIE, LIMITS, hashPassword, verifyPassword, validateAccount, fileDirectory, postgresDirectory, localSessionAuthenticator, parseCookies };
+function validScryptPasswordHash(stored) {
+  if (typeof stored !== 'string') return false;
+  const parts = stored.split('$');
+  if (parts.length !== 6 || parts[0] !== 'scrypt' || parts[1] !== String(SCRYPT.N) || parts[2] !== String(SCRYPT.r) || parts[3] !== String(SCRYPT.p)) return false;
+  try {
+    const salt = Buffer.from(parts[4], 'base64'); const hash = Buffer.from(parts[5], 'base64');
+    return salt.length === 16 && hash.length === 64 && salt.toString('base64') === parts[4] && hash.toString('base64') === parts[5];
+  } catch { return false; }
+}
+
+// Hosted Demo has one password-gated, fixed viewer and no account directory. Sessions and failed-login
+// counters are deliberately process-local; deployment must keep exactly one application instance.
+function hostedDemoSessionAuthenticator({ passwordHash, secureCookies = true, now = () => Date.now(), limits = LIMITS, loginLimit = HOSTED_LOGIN_LIMIT } = {}) {
+  if (!validScryptPasswordHash(passwordHash)) throw new Error('Hosted Demo requires a valid configured scrypt password hash.');
+  const sessions = new Map(); const failedLogins = new Map();
+  const cookie = (id, maxAge) => `${COOKIE}=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secureCookies ? '; Secure' : ''}`;
+  const viewer = principalOf({ name: 'Public Synthetic Demo Viewer', subject: 'hosted-demo:public', scope: 'all', institutionCode: null, roles: ['hosted_demo_viewer'], method: 'hosted_demo' });
+  function sessionOf(req) {
+    const id = parseCookies(req.headers.cookie)[COOKIE]; const stored = id && sessions.get(id); const t = now();
+    if (!stored) return null;
+    if (t - stored.last > limits.idleMs || t - stored.created > limits.absoluteMs) { sessions.delete(id); return null; }
+    stored.last = t; return { id, ...stored };
+  }
+  function attemptsFor(client, t = now()) {
+    const recent = (failedLogins.get(client) || []).filter(at => t - at < loginLimit.windowMs);
+    if (recent.length) failedLogins.set(client, recent); else failedLogins.delete(client);
+    return recent;
+  }
+  return Object.freeze({
+    kind: 'hosted_demo',
+    authenticate(req) {
+      const s = sessionOf(req); if (!s) return null;
+      if (!['GET', 'HEAD'].includes(req.method)) {
+        const token = String(req.headers['x-csrf-token'] || '');
+        if (token.length !== s.csrf.length || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(s.csrf))) throw new AuthError(403, 'The request is missing its session security token. Reload the page and try again.', 'csrf_failed');
+      }
+      return s.principal;
+    },
+    login(req, input = {}) {
+      const client = String(req.socket?.remoteAddress || 'unknown').slice(0, 128); const t = now();
+      const attempts = attemptsFor(client, t);
+      if (attempts.length >= loginLimit.failures) {
+        const retryAfter = Math.max(1, Math.ceil((attempts[0] + loginLimit.windowMs - t) / 1000));
+        return { status: 429, body: { error: 'Too many failed sign-in attempts. Try again later.', code: 'rate_limited' }, retryAfter };
+      }
+      if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'password')) return { status: 400, body: { error: 'Sign-in request must contain only a password.', code: 'invalid_request' } };
+      const candidate = typeof input.password === 'string' && input.password.length <= 256 ? input.password : '';
+      const ok = verifyPassword(candidate, passwordHash);
+      if (!ok) {
+        if (!failedLogins.has(client) && failedLogins.size >= 10000) failedLogins.delete(failedLogins.keys().next().value);
+        failedLogins.set(client, [...attempts, t]);
+        return { status: 401, body: { error: 'The demo password is not correct.', code: 'invalid_credentials' } };
+      }
+      failedLogins.delete(client);
+      const id = crypto.randomBytes(32).toString('base64url'); const csrf = crypto.randomBytes(24).toString('base64url');
+      sessions.set(id, { principal: viewer, csrf, created: t, last: t });
+      return { status: 200, body: { data: { authenticated: true, method: 'hosted_demo' } }, setCookie: cookie(id, Math.floor(limits.absoluteMs / 1000)) };
+    },
+    session(req) { const s = sessionOf(req); return s ? { viewer: { display_name: viewer.name, role: viewer.role }, csrf_token: s.csrf } : null; },
+    logout(req) { const s = sessionOf(req); if (s) sessions.delete(s.id); return cookie('', 0); },
+    sessionCount: () => sessions.size,
+    failedLoginCount: client => attemptsFor(String(client || 'unknown')).length
+  });
+}
+
+module.exports = { COOKIE, LIMITS, hashPassword, verifyPassword, validScryptPasswordHash, validateAccount, fileDirectory, postgresDirectory, localSessionAuthenticator, hostedDemoSessionAuthenticator, HOSTED_LOGIN_LIMIT, parseCookies };

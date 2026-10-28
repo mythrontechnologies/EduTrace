@@ -489,7 +489,7 @@ function runSimulation(db, p, input) {
     findings, identity, evidence, checklist,
     explanation: explain(path, findings, identity, evidence, checklist.after),
     graph_overlay: version ? graphOverlay(base, sim, p, staged, record.id, new Set([...identity.changed.map(x => x.after.pair_key), ...identity.withdrawn.map(x => x.pair.pair_key)])) : null,
-    scope_note: p.role === 'regulator' ? 'All institutions are in your access scope.' : 'Only findings and relationships whose records are all in your access scope are shown.',
+    scope_note: p.scope === 'all' ? 'All institutions are in your access scope.' : 'Only findings and relationships whose records are all in your access scope are shown.',
     diagnostics: { evaluated_as_of: at, pipeline: steps, isolated_copies: 2, persisted: false, receipts_created: 0, audit_events_written_to_authoritative_history: 0, model_calls: 0 }
   };
   return { report, baseState, simState, canonOf, version };

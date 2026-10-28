@@ -81,12 +81,23 @@ async function api(path, opts = {}) {
 
 /* ── Operating mode ───────────────────────────── */
 async function loadRuntime() {
-  try { state.runtime = (await api('/api/v1/runtime')).data; } catch { state.runtime = null; }
+  try { state.runtime = (await api('/api/v1/runtime')).data; }
+  catch {
+    showStartupError('EduTrace could not confirm the server configuration. Reload the page or contact the service operator.');
+    return false;
+  }
+  if (!state.runtime?.mode || !state.runtime?.auth) {
+    showStartupError('The server returned an incomplete configuration. Reload the page or contact the service operator.');
+    return false;
+  }
+  if (state.runtime.auth === 'hosted_demo' && (state.runtime.mode !== 'demo' || state.runtime.read_only !== true || state.runtime.data_source !== 'synthetic_in_memory' || state.runtime.ai_enabled !== false)) {
+    showStartupError('The hosted demo is not configured as a read-only synthetic experience.');
+    return false;
+  }
   state.readOnly = state.runtime?.read_only === true;
   document.documentElement.dataset.mode = state.runtime?.mode || 'unknown';
-  if (!['demo', 'synthetic-test'].includes(state.runtime?.mode)) $('#entryScreen').hidden = true;
   /* With identity-provider tokens the simulated role controls mean nothing, so they are hidden. */
-  state.auth = state.runtime?.auth || 'demo_header';
+  state.auth = state.runtime.auth;
   if (state.runtime?.mode === 'synthetic-test') {
     state.role = 'institution';
     const institutions = (await api('/api/v1/institutions')).data;
@@ -98,6 +109,17 @@ async function loadRuntime() {
   if (registrationLink) registrationLink.hidden = state.runtime?.registration_enabled !== true;
   if (state.auth !== 'demo_header') ['.scope-wrap', '#demoCompact'].forEach(sel => { const el = $(sel); if (el) el.hidden = true; });
   if (state.auth === 'oidc') $('.demo-card').hidden = true;
+  if (state.auth === 'hosted_demo') {
+    state.role = 'hosted_demo_viewer'; $('.demo-card').hidden = true;
+    $('[data-route="audit"]').hidden = true;
+    $('#exportAll').hidden = true;
+    $('#rxExport').hidden = true;
+    $('#tab-decisions').hidden = true;
+    $('#loginTitle').textContent = 'Enter the demo password';
+    $('#loginIntro').textContent = 'This read-only public walkthrough uses one fixed viewer identity. Your password is checked by the server and is never stored in this browser.';
+    $('#loginUsernameField').hidden = true;
+    $('#loginUser').required = false;
+  }
   /* Institution sign-in: the role and institution come from the account on the server. */
   if (state.auth === 'local') {
     const session = await api('/api/v1/auth/session').then(r => r.data).catch(() => ({ authenticated: false }));
@@ -107,13 +129,23 @@ async function loadRuntime() {
       renderSignedIn();
     } else {
       state.user = null; state.csrf = null;
-      if (state.runtime?.mode !== 'demo') { showLogin(); return false; }
+      showLogin(); return false;
     }
+  }
+  if (state.auth === 'hosted_demo') {
+    const session = await api('/api/v1/auth/session').then(r => r.data).catch(() => ({ authenticated: false }));
+    if (!session.authenticated || !session.csrf_token || session.method !== 'hosted_demo') {
+      state.user = null; state.csrf = null; showLogin(); return false;
+    }
+    state.user = session.viewer; state.csrf = session.csrf_token;
+    $('#hostedSignOut').hidden = false;
   }
   const banner = $('#modeBanner');
   banner.hidden = !state.readOnly;
   if (state.readOnly) banner.innerHTML = `${icon('shield', 'icon-sm')}<span><strong>Read-only demo.</strong> Synthetic records only, held in memory. The server rejects imports, decisions, corrections and resets, and model assistance is off.</span>`;
-  if (state.readOnly) $('#auditSub').textContent = 'Every user decision and import batch in your access scope, as recorded in the synthetic demo dataset. Nothing new can be recorded in this read-only demo.';
+  if (state.readOnly) $('#auditSub').textContent = state.auth === 'hosted_demo'
+    ? 'Synthetic import batches are available for review. Decision history and exports are not available in the public walkthrough.'
+    : 'Every user decision and import batch in your access scope, as recorded in the synthetic demo dataset. Nothing new can be recorded in this read-only demo.';
   if (state.runtime?.mode === 'synthetic-test') {
     banner.hidden = false;
     banner.innerHTML = `${icon('flask', 'icon-sm')}<span><strong>Ephemeral synthetic test environment.</strong> Generated synthetic data only. CSV imports are held in memory on this computer and are discarded when the server restarts.</span>`;
@@ -122,120 +154,34 @@ async function loadRuntime() {
   return true;
 }
 
-const ENTRY_MODE_KEY = `edutrace.entry.mode${APP_BASE || ".direct"}`;
-function entryRoute() { return location.hash.replace(/^#\/?/, '') || 'entry'; }
-function entryAllowed() {
-  const selected = readStore(ENTRY_MODE_KEY, '');
-  if (selected !== state.runtime?.mode) return false;
-  if (selected === 'demo') return state.auth === 'local' && Boolean(state.user);
-  return selected === 'synthetic-test' && state.auth === 'synthetic_test';
-}
-function showEntry(message = '') {
-  if ($('#loginDialog').open) $('#loginDialog').close();
-  if ($('#registrationDialog').open) $('#registrationDialog').close();
+function showStartupError(message) {
+  $('#entryTitle').textContent = 'EduTrace is unavailable';
+  $('#entryStatus').textContent = message;
   $('#entryScreen').hidden = false;
   $('#shell').hidden = true;
-  $('#entryStatus').textContent = message;
-  $('#loginEntryBack').hidden = true;
-  state.entryLogin = false;
 }
 function enterWorkspace({ render = true } = {}) {
   $('#entryScreen').hidden = true;
   $('#shell').hidden = false;
-  $('#loginEntryBack').hidden = true;
-  state.entryLogin = false;
   if (render) {
     syncRoleControls();
     refreshPrincipal();
     renderRoute({ force: true });
   }
 }
-function chooseEntryMode(mode) {
-  const configured = state.runtime?.mode;
-  if (mode !== configured) {
-    $('#entryStatus').textContent = `This server is running ${configured || 'an unknown mode'}. Selecting a card cannot change the server mode. Restart locally with EDUTRACE_MODE=${mode} to use that workspace.`;
-    return;
-  }
-  if (mode === 'demo') {
-    if (state.auth !== 'local') {
-      $('#entryStatus').textContent = 'Demo sign-in is not enabled on this server. Restart read-only Demo Mode with EDUTRACE_AUTH=local and use an existing local account.';
-      return;
-    }
-    writeStore(ENTRY_MODE_KEY, 'demo');
-    if (state.user) { location.hash = '#/overview'; enterWorkspace(); }
-    else {
-      location.hash = '#/demo-login';
-      $('#entryScreen').hidden = true; $('#shell').hidden = true;
-      $('#loginEntryBack').hidden = false; showLogin();
-    }
-    return;
-  }
-  if (mode === 'synthetic-test' && state.auth === 'synthetic_test') {
-    writeStore(ENTRY_MODE_KEY, mode);
-    location.hash = '#/overview';
-    enterWorkspace();
-    return;
-  }
-  showEntry('This workspace is not available under the current server configuration.');
-}
 function handleEntryNavigation() {
-  const route = entryRoute();
+  const route = location.hash.replace(/^#\/?/, '') || 'overview';
   const mountedMode = APP_MOUNT === 'demo' ? 'demo' : APP_MOUNT === 'synthetic' ? 'synthetic-test' : null;
   if (mountedMode && mountedMode !== state.runtime?.mode) {
-    showEntry(`This ${mountedMode} route is connected to a server running ${state.runtime?.mode || 'an unknown mode'}. No request can switch the server mode.`);
+    showStartupError(`This ${mountedMode} address is connected to a server running ${state.runtime?.mode || 'an unknown mode'}.`);
     return;
   }
-  if (mountedMode === 'synthetic-test' && route === 'entry') {
-    writeStore(ENTRY_MODE_KEY, mountedMode);
+  if (route === 'entry') {
     history.replaceState(null, '', `${APP_BASE}/#/overview`);
-    enterWorkspace();
-    return;
-  }
-  if (mountedMode === 'demo' && route === 'entry') {
-    if (state.auth !== 'local') {
-      showEntry('Demo sign-in is not enabled on this server. Use a local-auth Demo backend to continue.');
-      return;
-    }
-    writeStore(ENTRY_MODE_KEY, mountedMode);
-    if (state.user) {
-      history.replaceState(null, '', `${APP_BASE}/#/overview`);
-      enterWorkspace();
-    } else {
-      history.replaceState(null, '', `${APP_BASE}/#/demo-login`);
-      $('#entryScreen').hidden = true; $('#shell').hidden = true;
-      $('#loginEntryBack').hidden = false;
-      showLogin();
-    }
-    return;
-  }
-  if (route === 'entry') { showEntry(); return; }
-  if (route === 'demo-login') {
-    if (state.runtime?.mode === 'demo' && state.auth === 'local' && state.user && readStore(ENTRY_MODE_KEY, '') === 'demo') {
-      history.replaceState(null, '', '#/overview');
-      enterWorkspace({ render: false });
-      renderRoute({ force: true });
-      return;
-    }
-    if (state.runtime?.mode === 'demo' && state.auth === 'local' && readStore(ENTRY_MODE_KEY, '') === 'demo') {
-      $('#entryScreen').hidden = true; $('#shell').hidden = true; state.entryLogin = true; showLogin();
-      $('#loginEntryBack').hidden = false;
-    } else showEntry('Demo login requires the read-only demo server and its configured local sign-in.');
-    return;
-  }
-  if (!entryAllowed()) {
-    showEntry('Choose the workspace that matches this server. The server mode is fixed at startup.');
-    return;
   }
   enterWorkspace({ render: false });
   renderRoute({ force: true });
 }
-$$('[data-entry-mode]').forEach(button => button.addEventListener('click', () => chooseEntryMode(button.dataset.entryMode)));
-$('#loginEntryBack').addEventListener('click', () => {
-  $('#loginDialog').close();
-  writeStore(ENTRY_MODE_KEY, '');
-  history.replaceState(null, '', '#/entry');
-  showEntry();
-});
 
 function renderSyntheticTestCard(institutions) {
   const card = $('.demo-card');
@@ -264,18 +210,19 @@ function renderSignedIn() {
   $('#signOut').addEventListener('click', async () => {
     try { await api('/api/v1/auth/logout', { method: 'POST', body: '{}' }); } catch { /* the session may already have ended */ }
     if (state.runtime?.mode !== 'demo') { location.reload(); return; }
-    writeStore(ENTRY_MODE_KEY, '');
     state.user = null; state.csrf = null;
-    history.pushState(null, '', '#/entry');
-    showEntry();
+    history.replaceState(null, '', `${APP_BASE}/#/overview`);
+    showLogin();
   });
 }
 
 function showLogin(message = '') {
+  $('#entryScreen').hidden = true;
+  $('#shell').hidden = true;
   const dialog = $('#loginDialog');
   $('#loginError').hidden = !message; $('#loginError').textContent = message;
   if (!dialog.open) dialog.showModal();
-  $('#loginUser').focus();
+  (state.auth === 'hosted_demo' ? $('#loginPass') : $('#loginUser')).focus();
 }
 $$('[data-password-toggle]').forEach(button => button.addEventListener('click', () => {
   const input = document.getElementById(button.dataset.passwordToggle);
@@ -289,13 +236,25 @@ $('#loginDialog').addEventListener('cancel', event => event.preventDefault());
 $('#loginForm').addEventListener('submit', async event => {
   event.preventDefault();
   const error = $('#loginError'); error.hidden = true;
+  const hosted = state.auth === 'hosted_demo';
   const username = $('#loginUser').value.trim(); const password = $('#loginPass').value;
-  if (!username || !password) { error.textContent = 'Enter your username and password.'; error.hidden = false; return; }
+  if ((!hosted && !username) || !password) { error.textContent = hosted ? 'Enter the demo password.' : 'Enter your username and password.'; error.hidden = false; return; }
   try {
-    await withFeedback($('#loginSubmit'), () => api('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }), { done: 'Signed in', failed: 'Not signed in' });
+    const credentials = hosted ? { password } : { username, password };
+    await withFeedback($('#loginSubmit'), () => api('/api/v1/auth/login', { method: 'POST', body: JSON.stringify(credentials) }), { done: 'Signed in', failed: 'Not signed in' });
     $('#loginPass').value = '';
     location.reload();
   } catch (err) { error.textContent = err.message; error.hidden = false; $('#loginPass').select(); }
+});
+
+$('#hostedSignOut').addEventListener('click', async () => {
+  const button = $('#hostedSignOut'); button.disabled = true;
+  try {
+    await api('/api/v1/auth/logout', { method: 'POST', body: '{}' });
+    state.csrf = null; state.user = null; location.reload();
+  } catch (error) {
+    toast(error.message || 'Sign-out could not be completed. Try again.', { title: 'Still signed in' });
+  } finally { button.disabled = false; }
 });
 
 async function openRegistration() {
@@ -911,6 +870,7 @@ function initShell() {
   });
 
   window.addEventListener('hashchange', handleEntryNavigation);
+  window.addEventListener('popstate', handleEntryNavigation);
 }
 
 function syncThemeToggle() {
@@ -1065,13 +1025,14 @@ function renderMetrics(summaryRes, automationRes, findingsRes, importsRes) {
     return;
   }
   const d = summaryRes.value.data;
+  const hostedViewer = state.auth === 'hosted_demo';
   const syntheticTest = state.runtime?.mode === 'synthetic-test';
   const a = automationRes.status === 'fulfilled' ? automationRes.value.data : null;
   const findings = findingsRes.status === 'fulfilled' ? findingsRes.value.data : null;
   const batches = importsRes.status === 'fulfilled' ? importsRes.value.data : null;
   const open = findings ? findings.filter(f => f.review_status !== 'resolved') : [];
-  const highOpen = open.filter(f => f.severity === 'high').length;
-  const awaiting = d.by_status.find(s => s.status === 'awaiting_verification')?.count ?? 0;
+  const highOpen = (hostedViewer ? (findings || []).filter(f => f.severity === 'high') : open.filter(f => f.severity === 'high')).length;
+  const awaiting = hostedViewer ? 0 : d.by_status.find(s => s.status === 'awaiting_verification')?.count ?? 0;
   const cards = [
     {
       label: syntheticTest ? 'Records in current institution' : 'Imported records', iconName: 'database', value: d.imported_records,
@@ -1080,19 +1041,19 @@ function renderMetrics(summaryRes, automationRes, findingsRes, importsRes) {
     },
     {
       label: 'Automatically processed', iconName: 'check-circle', tone: 'is-success', value: a ? a.automatic : null,
-      foot: a ? `${pct(a.automatic_rate)} with no open finding` : 'Unavailable',
-      tip: a ? `${a.rate_definition} This is not authoritative identifier verification.` : 'Processing outcomes could not be loaded.'
+      foot: a ? (hostedViewer ? `${a.automatic} of ${a.records} records` : `${pct(a.automatic_rate)} with no open finding`) : 'Unavailable',
+      tip: a ? (hostedViewer ? 'Records processed automatically by deterministic rules. This is not identity verification.' : `${a.rate_definition} This is not authoritative identifier verification.`) : 'Processing outcomes could not be loaded.'
     },
     {
-      label: 'Open findings', iconName: 'alert-triangle', tone: 'is-warning', value: d.open_findings,
+      label: hostedViewer ? 'Current findings' : 'Open findings', iconName: 'alert-triangle', tone: 'is-warning', value: hostedViewer ? d.accessible_findings : d.open_findings,
       foot: findings ? (highOpen ? `${highOpen} high severity` : 'None high severity') : `of ${d.accessible_findings} current`,
-      tip: d.metric_definitions.open_findings, href: '#/reconciliation', linkText: 'Open the reconciliation workspace'
+      tip: hostedViewer ? 'Current synthetic rule findings in the demo dataset.' : d.metric_definitions.open_findings, href: '#/reconciliation', linkText: 'Browse findings'
     },
-    {
+    ...(!hostedViewer ? [{
       label: 'Pending review', iconName: 'clock', tone: 'is-pending', value: d.pending_decisions,
       foot: awaiting ? `${awaiting} awaiting verification` : 'No decision recorded yet',
       tip: d.metric_definitions.pending_decisions, href: '#/reconciliation?status=pending', linkText: 'View findings pending review'
-    }
+    }] : [])
   ];
   el.innerHTML = cards.map(card => `
     <article class="metric${card.href ? ' is-link' : ''}">
@@ -1284,11 +1245,14 @@ function renderAutomation(res) {
   const statuses = PROCESSING_ORDER.filter(key => a.by_status[key]);
   const v = a.verification || {};
   const ai = a.ai || {};
-  const definition = `${a.rate_definition} ${v.authoritatively_verified ?? 0} identifiers are authoritatively verified: no verification service is connected, so this is not identity verification.`;
+  const hostedViewer = state.auth === 'hosted_demo';
+  const definition = hostedViewer
+    ? 'Records processed automatically by deterministic rules. This is not identity verification.'
+    : `${a.rate_definition} ${v.authoritatively_verified ?? 0} identifiers are authoritatively verified: no verification service is connected, so this is not identity verification.`;
   el.innerHTML = `
     <div class="ap-rate">
-      <span class="ap-pct">${esc(pct(a.automatic_rate))}</span>
-      <span class="ap-sub">${fmtNum(a.automatic)} of ${plural(a.records, 'record')} processed with no open finding
+      <span class="ap-pct">${hostedViewer ? fmtNum(a.automatic) : esc(pct(a.automatic_rate))}</span>
+      <span class="ap-sub">${fmtNum(a.automatic)} of ${plural(a.records, 'record')} ${hostedViewer ? 'processed automatically' : 'processed with no open finding'}
         <button type="button" class="tip" data-tip="${esc(definition)}" aria-label="${esc(`How this is measured: ${definition}`)}">${icon('help', 'icon-sm')}</button></span>
     </div>
     <div class="meter-bar ap-bar" role="img" aria-label="${esc(statuses.map(key => `${a.labels[key]}: ${a.by_status[key]}`).join(', '))}">
@@ -1439,7 +1403,7 @@ let auditToken = 0;
 
 registerView('audit', {
   enter(params) {
-    selectAuditTab(params.get('tab') === 'imports' ? 'imports' : 'decisions', false);
+    selectAuditTab(state.auth === 'hosted_demo' || params.get('tab') === 'imports' ? 'imports' : 'decisions', false);
     loadAudit();
   }
 });
@@ -1475,10 +1439,16 @@ async function loadAudit() {
   const token = ++auditToken;
   $('#panel-decisions').innerHTML = `<div class="card-body">${skeletonLines(5)}</div>`;
   $('#panel-imports').innerHTML = `<div class="card-body">${skeletonLines(5)}</div>`;
-  const [auditRes, importsRes] = await Promise.allSettled([api('/api/v1/audit?limit=200'), api('/api/v1/imports')]);
+  const [auditRes, importsRes] = await Promise.all([
+    state.auth === 'hosted_demo' ? Promise.resolve({ status: 'skipped' }) : api('/api/v1/audit?limit=200').then(value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason })),
+    api('/api/v1/imports').then(value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason }))
+  ]);
   if (token !== auditToken) return;
 
-  if (auditRes.status === 'rejected') {
+  if (auditRes.status === 'skipped') {
+    $('#panel-decisions').innerHTML = '';
+    $('#auditDecisionCount').textContent = '—';
+  } else if (auditRes.status === 'rejected') {
     $('#panel-decisions').innerHTML = errorState(auditRes.reason.message, 'data-retry-audit');
     $('#auditDecisionCount').textContent = '!';
   } else {
@@ -1537,11 +1507,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   initShell();
   initAuditTabs();
   if (!(await loadRuntime())) return;
-  if (!['demo', 'synthetic-test'].includes(state.runtime?.mode)) {
-    $('#entryScreen').hidden = true;
-    $('#shell').hidden = false;
-    syncRoleControls(); refreshPrincipal(); renderRoute();
-    return;
-  }
   handleEntryNavigation();
 });

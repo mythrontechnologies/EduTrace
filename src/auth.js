@@ -7,6 +7,8 @@
 //   demo_header  the read-only demo. The x-demo-role header names a simulated principal
 //                (regulator lens or the NITM lens). It is a labelled simulation, not authentication: the
 //                header is the claim. A request without a recognised header is anonymous and gets 401.
+//   hosted_demo  a password-verified session for one fixed hosted_demo_viewer principal. It has only
+//                records.read; session IDs and login-failure counters are held in process memory.
 //   oidc         OpenID Connect bearer tokens (JWT, RS256 or ES256) verified against the identity
 //                provider's JWKS: signature, issuer, audience, expiry, not-before and issued-at with a
 //                bounded clock skew. Roles and institution memberships come only from the server-side
@@ -16,7 +18,7 @@
 // see the immutable synthetic in-memory dataset.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const { StartupError } = require('./mode');
+const { StartupError, hostedEnvironment } = require('./mode');
 
 const CAPABILITIES = {
   'records.read': 'Read source records, findings, matches, graph, history and notifications in scope',
@@ -28,6 +30,7 @@ const CAPABILITIES = {
   'corrections.decide': 'Confirm or reject correction candidates',
   'notifications.acknowledge': 'Acknowledge exception notifications',
   'imports.write': 'Preview and import source files',
+  'imports.multi_institution': 'Import source files across institutions',
   'simulations.run': 'Run Evidence Impact Lab simulations (never saved)',
   'ai.assist': 'Request advisory model explanations',
   'ai.status': 'See model provider status',
@@ -40,10 +43,11 @@ const CAPABILITIES = {
   'pii.read': 'See full names and dates of birth on record-level views (identifiers stay masked)'
 };
 const ROLES = {
+  hosted_demo_viewer: ['records.read'],
   reviewer: ['session.signout', 'pii.read', 'records.read', 'audit.read', 'receipts.read', 'reports.export', 'findings.decide', 'matches.decide', 'notifications.acknowledge', 'simulations.run', 'ai.assist', 'ai.status'],
   auditor: ['session.signout', 'records.read', 'audit.read', 'receipts.read', 'reports.export', 'ai.status'],
   institution_admin: ['session.signout', 'consent.record', 'pii.read', 'records.read', 'audit.read', 'receipts.read', 'reports.export', 'imports.write', 'corrections.decide', 'notifications.acknowledge', 'simulations.run', 'ai.status'],
-  platform_admin: ['session.signout', 'ai.status', 'ai.check', 'automation.revalidate', 'data.reset', 'data.initialize']
+  platform_admin: ['session.signout', 'ai.status', 'ai.check', 'automation.revalidate', 'data.reset', 'data.initialize', 'imports.multi_institution']
 };
 
 // The capability each API route needs. Paths and methods mirror server.js; a test checks every route has a rule.
@@ -61,9 +65,12 @@ const ROUTE_RULES = [
   ['POST', /^\/api\/v1\/imports\/preview$/, 'imports.write'], ['POST', /^\/api\/v1\/imports\/confirm$/, 'imports.write'], ['GET', /^\/api\/v1\/reports\/findings\.csv$/, 'reports.export'],
   ['POST', /^\/api\/v1\/demo\/reset$/, 'data.reset'], ['POST', /^\/api\/v1\/admin\/initialize-empty-import$/, 'data.initialize'], ['GET', /^\/api\/v1\/integrations$/, 'records.read'], ['POST', /^\/api\/v1\/auth\/logout$/, 'session.signout'], ['POST', /^\/api\/v1\/records\/[^/]+\/consent$/, 'consent.record'], ['GET', /^\/api\/v1\/records\/[^/]+\/verification$/, 'records.read']
 ];
-const PUBLIC_API = new Set(['/api/v1/runtime', '/api/v1/institutions', '/api/v1/auth/login', '/api/v1/auth/session', '/api/v1/auth/register']);
-function routeRule(method, pathname) {
-  if (!pathname.startsWith('/api/') || PUBLIC_API.has(pathname)) return { public: true, capability: null };
+const PUBLIC_API = new Set(['GET /api/v1/runtime', 'GET /api/v1/institutions', 'POST /api/v1/auth/login', 'GET /api/v1/auth/session', 'POST /api/v1/auth/register']);
+function routeRule(method, pathname, { hostedDemo = false } = {}) {
+  if (!pathname.startsWith('/api/')) return { public: true, capability: null };
+  if (hostedDemo && method === 'POST' && pathname === '/api/v1/auth/logout') return { public: false, capability: null };
+  if (hostedDemo && method === 'GET' && pathname === '/api/v1/institutions') return { public: false, capability: 'records.read' };
+  if (PUBLIC_API.has(`${method} ${pathname}`)) return { public: true, capability: null };
   const rule = ROUTE_RULES.find(([m, re]) => m === method && re.test(pathname));
   return { public: false, capability: rule ? rule[2] : null };
 }
@@ -72,7 +79,14 @@ class AuthError extends Error { constructor(status, message, code) { super(messa
 
 function principalOf({ name, subject, scope, institutionCode, roles, method }) {
   const capabilities = [...new Set(roles.flatMap(role => ROLES[role] || []))].sort();
-  return { role: scope === 'all' ? 'regulator' : 'institution', institution_code: scope === 'all' ? null : institutionCode, name, subject, roles: [...roles].sort(), capabilities, authenticated: true, method };
+  const role = roles.includes('hosted_demo_viewer') ? 'hosted_demo_viewer'
+    : scope !== 'all' ? 'institution'
+      : method === 'demo_header' ? 'regulator'
+        : roles.includes('platform_admin') ? 'platform_admin'
+          : roles.includes('institution_admin') ? 'institution_admin'
+            : roles.includes('reviewer') ? 'reviewer'
+              : roles.includes('auditor') ? 'auditor' : 'institution';
+  return { role, scope, institution_code: scope === 'all' ? null : institutionCode, name, subject, roles: [...roles].sort(), capabilities, authenticated: true, method };
 }
 
 // ── demo_header ──────────────────────────────────────────────────────────────────
@@ -83,6 +97,10 @@ const DEMO_PRINCIPALS = {
 function demoHeaderAuthenticator() {
   return { kind: 'demo_header', authenticate(req) { const role = req.headers['x-demo-role']; return DEMO_PRINCIPALS[role] ? DEMO_PRINCIPALS[role]() : null; } };
 }
+
+// Hosted Demo has one fixed, password-gated viewer. Password verification and process-local sessions
+// live with the existing account/session helpers, but no account directory is created or consulted.
+function hostedDemoAuthenticator(options) { return require('./accounts').hostedDemoSessionAuthenticator(options); }
 
 // ── oidc ─────────────────────────────────────────────────────────────────────────
 const b64url = s => Buffer.from(s, 'base64url');
@@ -161,7 +179,14 @@ function authFromEnv(env, mode, { pool = null, usersPath = null } = {}) {
     const { localSessionAuthenticator, fileDirectory, postgresDirectory } = require('./accounts');
     return localSessionAuthenticator({ directory: pool ? postgresDirectory(pool) : fileDirectory(usersPath), secureCookies: String(env.EDUTRACE_COOKIE_SECURE || '').toLowerCase() === 'true' });
   }
-  if (mode === 'demo') throw new StartupError('The read-only demo supports simulated viewing or opt-in local accounts only.');
+  if (kind === 'hosted_demo') {
+    if (mode !== 'demo') throw new StartupError('EDUTRACE_AUTH=hosted_demo is only available with EDUTRACE_MODE=demo.');
+    const passwordHash = env.EDUTRACE_HOSTED_DEMO_PASSWORD_HASH;
+    const { validScryptPasswordHash } = require('./accounts');
+    if (!validScryptPasswordHash(passwordHash)) throw new StartupError('EDUTRACE_HOSTED_DEMO_PASSWORD_HASH must contain a valid scrypt hash; secret values are never displayed.');
+    return hostedDemoAuthenticator({ passwordHash, secureCookies: hostedEnvironment(env).length > 0 });
+  }
+  if (mode === 'demo') throw new StartupError('The read-only demo supports demo_header, local, or hosted_demo authentication only.');
   if (kind !== 'oidc') throw new StartupError(`EDUTRACE_AUTH="${String(kind).slice(0, 20)}" is not recognised.`, ['Supported values: local or oidc (development); local or demo_header (demo).']);
   if (mode !== 'development') throw new StartupError(`EDUTRACE_AUTH=oidc is available in development mode only in this build (mode: ${mode}).`);
   const missing = ['EDUTRACE_OIDC_ISSUER', 'EDUTRACE_OIDC_AUDIENCE', 'EDUTRACE_OIDC_JWKS_PATH', 'EDUTRACE_MEMBERSHIPS_PATH'].filter(k => !env[k]);
@@ -171,4 +196,4 @@ function authFromEnv(env, mode, { pool = null, usersPath = null } = {}) {
   return oidcAuthenticator({ issuer: env.EDUTRACE_OIDC_ISSUER, audience: env.EDUTRACE_OIDC_AUDIENCE, keys: jwks.keys, memberships: members });
 }
 
-module.exports = { CAPABILITIES, ROLES, ROUTE_RULES, routeRule, AuthError, principalOf, verifyJwt, parseMemberships, demoHeaderAuthenticator, oidcAuthenticator, authFromEnv };
+module.exports = { CAPABILITIES, ROLES, ROUTE_RULES, routeRule, AuthError, principalOf, verifyJwt, parseMemberships, demoHeaderAuthenticator, hostedDemoAuthenticator, oidcAuthenticator, authFromEnv };

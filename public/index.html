@@ -79,30 +79,13 @@
 
   <section class="entry-screen" id="entryScreen" aria-labelledby="entryTitle">
     <div class="entry-card">
-      <a class="entry-brand" href="#/entry" aria-label="EduTrace AI entry page">
+      <a class="entry-brand" href="#/overview" aria-label="EduTrace AI">
         <span class="entry-mark" aria-hidden="true">E</span>
         <span><strong>EduTrace AI</strong><small>Enrolment integrity</small></span>
       </a>
-      <p class="entry-eyebrow">Choose your workspace</p>
-      <h1 id="entryTitle">Welcome to EduTrace AI</h1>
-      <p class="entry-intro">Explore the read-only demo or test CSV imports in an isolated synthetic workspace.</p>
-      <div class="entry-choices">
-        <article class="entry-choice">
-          <div class="entry-choice-icon" aria-hidden="true">◎</div>
-          <h2>Demo Mode</h2>
-          <p>Explore synthetic enrolment records, findings and reconciliation results in a read-only environment.</p>
-          <p class="entry-safety"><strong>Safety:</strong> Read-only synthetic data.</p>
-          <button type="button" class="btn btn-primary" data-entry-mode="demo">Continue to Demo Login</button>
-        </article>
-        <article class="entry-choice entry-choice-test">
-          <div class="entry-choice-icon" aria-hidden="true">⌁</div>
-          <h2>Synthetic Test Mode</h2>
-          <p>Test CSV uploads, column mapping, validation and institution-scoped reconciliation using generated synthetic data. Changes are temporary and discarded on restart.</p>
-          <p class="entry-safety"><strong>Safety:</strong> Temporary data; imports are allowed only in the isolated test workspace.</p>
-          <button type="button" class="btn btn-primary" data-entry-mode="synthetic-test">Enter Synthetic Test Workspace</button>
-        </article>
-      </div>
-      <p class="entry-status" id="entryStatus" role="status" aria-live="polite"></p>
+      <p class="entry-eyebrow">Secure synthetic demonstration</p>
+      <h1 id="entryTitle">Opening EduTrace</h1>
+      <p class="entry-intro entry-status" id="entryStatus" role="status" aria-live="polite">Loading the server's configured experience…</p>
     </div>
   </section>
 
@@ -192,6 +175,7 @@
           <kbd aria-hidden="true">/</kbd>
         </form>
         <div class="topbar-right">
+          <button type="button" class="btn btn-secondary btn-sm" id="hostedSignOut" hidden>Sign out</button>
           <div class="scope-wrap">
             <button type="button" class="scope-chip" id="scopeChip" aria-haspopup="dialog" aria-expanded="false" aria-controls="scopeMenu">
               <svg class="icon icon-sm" aria-hidden="true"><use href="#i-flask"/></svg>
@@ -572,17 +556,16 @@
     </div>
   </dialog>
 
-  <!-- Local sign-in (shown only when the server uses local accounts) -->
+  <!-- Sign-in is shown for local accounts or the fixed hosted-demo viewer. -->
   <dialog class="modal login-dialog" id="loginDialog" aria-labelledby="loginTitle" aria-describedby="loginIntro">
     <form class="modal-inner" id="loginForm" novalidate>
       <h2 id="loginTitle">Sign in to EduTrace</h2>
       <p class="modal-body" id="loginIntro">Use your EduTrace account. Your role and institution come from the account on the server.</p>
-      <div class="field"><label class="field-label" for="loginUser">Username</label><input class="input" id="loginUser" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+      <div class="field" id="loginUsernameField"><label class="field-label" for="loginUser">Username</label><input class="input" id="loginUser" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
       <div class="field"><label class="field-label" for="loginPass">Password</label><div class="password-control"><input class="input" id="loginPass" type="password" autocomplete="current-password" required><button type="button" class="btn btn-secondary btn-sm password-toggle" data-password-toggle="loginPass" aria-controls="loginPass" aria-pressed="false">Show</button></div></div>
       <p class="field-error" id="loginError" role="alert" hidden></p>
       <div class="modal-actions"><button type="submit" class="btn btn-primary" id="loginSubmit">Sign in</button></div>
       <button type="button" class="registration-link" id="openRegistration" hidden>New user? Create account</button>
-      <button type="button" class="entry-back-link" id="loginEntryBack" hidden>Back to mode selection</button>
     </form>
   </dialog>
 

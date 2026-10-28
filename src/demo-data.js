@@ -18,6 +18,7 @@ const { decideMatch, REVIEWABLE } = require('./matches');
 const { recordConsent } = require('./apaar');
 
 const DEMO_SEED = 'edutrace-demo-v1';
+const DEMO_STORES = new WeakSet();
 const REVIEWER = Object.freeze({ role: 'regulator', institution_code: null, name: 'Demo Regulator Reviewer' });
 // Synthetic consent states, so the demo shows granted, withdrawn and not-recorded students.
 const CONSENT = [['SRC-3', 'granted', '2026-10-21T09:00:00.000Z'], ['SRC-4', 'granted', '2026-10-21T09:05:00.000Z'], ['SRC-6', 'granted', '2026-10-21T09:10:00.000Z'], ['SRC-121', 'granted', '2026-10-21T09:15:00.000Z'], ['SRC-201', 'granted', '2026-10-21T09:20:00.000Z'], ['SRC-201', 'withdrawn', '2026-10-24T16:00:00.000Z']];
@@ -67,16 +68,20 @@ function buildDemoDataset() {
 // The demo store hands every request its own parsed copy of one immutable JSON snapshot, so even a
 // read path that mutated its input could not change what the next request sees. save() and reset()
 // always throw: the request guard in server.js rejects writes first, and this is the second line.
-function createDemoStore(dataset = buildDemoDataset()) {
+function createDemoStore(dataset = buildDemoDataset(), { onLoad } = {}) {
   const snapshot = JSON.stringify(dataset);
   const fingerprint = crypto.createHash('sha256').update(snapshot).digest('hex');
-  return Object.freeze({
+  const store = Object.freeze({
     kind: 'memory', readOnly: true, fingerprint,
-    load: () => JSON.parse(snapshot),
+    load: (...args) => { onLoad?.(...args); return JSON.parse(snapshot); },
     save() { throw new ReadOnlyError(); },
     reset() { throw new ReadOnlyError(); },
     verify: () => crypto.createHash('sha256').update(snapshot).digest('hex') === fingerprint
   });
+  DEMO_STORES.add(store);
+  return store;
 }
 
-module.exports = { DEMO_SEED, STEPS, ReadOnlyError, deterministic, buildDemoDataset, createDemoStore };
+function isDemoStore(store) { return Boolean(store && DEMO_STORES.has(store)); }
+
+module.exports = { DEMO_SEED, STEPS, ReadOnlyError, deterministic, buildDemoDataset, createDemoStore, isDemoStore };

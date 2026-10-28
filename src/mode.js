@@ -5,7 +5,8 @@
 //                bearer tokens); every route; AI as configured.
 //   demo         A public, read-only walkthrough: a deterministic synthetic dataset built in memory
 //                at startup, application writes rejected with 403, AI forced off. It never reads or
-//                writes a database file. Optional local judge accounts use the separate users store.
+//                writes a database file. Local judge accounts use the separate users store; hosted
+//                Demo uses a password secret and process-local fixed-viewer sessions.
 //   synthetic-test A localhost-only, ephemeral test harness with generated in-memory data.
 //   production   Refuses to start until real production prerequisites exist in code (see
 //                PRODUCTION_REQUIREMENTS). Nothing in this file can be switched on by an env flag.

@@ -12,7 +12,8 @@ const { saveDemo, loadDemo } = require('../src/seed');
 const { buildDemoDataset } = require('../src/demo-data');
 const { createDemoStore } = require('../src/demo-data');
 const { commitImport } = require('../src/pipeline');
-const { ROLES, ROUTE_RULES, routeRule, principalOf, verifyJwt, parseMemberships, oidcAuthenticator, demoHeaderAuthenticator, authFromEnv } = require('../src/auth');
+const { ROLES, ROUTE_RULES, routeRule, principalOf, verifyJwt, parseMemberships, oidcAuthenticator, demoHeaderAuthenticator, hostedDemoAuthenticator, authFromEnv } = require('../src/auth');
+const { validateAccount, hashPassword } = require('../src/accounts');
 const { StartupError } = require('../src/mode');
 
 const ROOT = path.join(__dirname, '..');
@@ -109,27 +110,51 @@ test('an anonymous request gets 401 on every API route before any body is read o
   assert.equal((await call(demo, { method: 'POST', url: '/api/v1/demo/reset' })).status, 403);
   assert.equal((await call(demo, { url: '/api/v1/findings' })).status, 401);
   assert.equal((await call(demo, { url: '/api/v1/findings', headers: { 'x-demo-role': 'institution' } })).status, 200);
+
+  const hosted = hostedDemoAuthenticator({ passwordHash: hashPassword('test-only-hosted-viewer-password-2026'), secureCookies: false });
+  const hostedLoads = [];
+  const hostedStore = createDemoStore(undefined, { onLoad: (...args) => { hostedLoads.push(args); } });
+  const hostedApp = createApp({ mode: 'demo', store: hostedStore, auth: hosted });
+  for (const [method, url] of sampleRoutes(buildDemoDataset())) {
+    let bodyRead = false;
+    const response = await call(hostedApp, { method, url, json: {}, headers: { 'content-type': 'application/json', 'x-demo-role': 'regulator' }, onBodyRead: () => { bodyRead = true; } });
+    if (method === 'POST' && url === '/api/v1/auth/logout') assert.equal(response.status, 401, 'logout requires a valid authenticated session');
+    else if (method !== 'GET') { assert.equal(response.status, 403, `${method} ${url} stays blocked by the hosted read-only guard`); assert.equal(response.json.code, 'read_only_demo'); }
+    else { assert.equal(response.status, 401, `${method} ${url} requires the hosted password session`); assert.equal(response.json.code, 'unauthenticated'); }
+    assert.equal(bodyRead, false, `${method} ${url} is rejected before reading a body`);
+  }
+  assert.equal(hostedLoads.length, 0, 'no hosted request reaches the data store before login');
 });
 
 test('roles map to explicit capabilities, and a missing capability is refused before data is touched', async () => {
   const expected = {
+    hosted_demo_viewer: { allow: ['GET /api/v1/dashboard/summary', 'GET /api/v1/records'], deny: ['GET /api/v1/audit', 'GET /api/v1/receipts/x', 'GET /api/v1/reports/findings.csv', 'GET /api/v1/ai/status', 'POST /api/v1/findings/x/decision', 'POST /api/v1/imports/preview', 'POST /api/v1/demo/reset'] },
     reviewer: { allow: ['GET /api/v1/findings', 'POST /api/v1/findings/x/decision', 'POST /api/v1/matches/x/decision', 'POST /api/v1/simulations/correction'], deny: ['POST /api/v1/imports/confirm', 'POST /api/v1/corrections/x/decision', 'POST /api/v1/automation/revalidate', 'POST /api/v1/ai/check', 'POST /api/v1/demo/reset', 'POST /api/v1/admin/initialize-empty-import'] },
     auditor: { allow: ['GET /api/v1/audit', 'GET /api/v1/receipts/x', 'GET /api/v1/reports/findings.csv'], deny: ['POST /api/v1/findings/x/decision', 'POST /api/v1/matches/x/decision', 'POST /api/v1/imports/preview', 'POST /api/v1/simulations/correction', 'POST /api/v1/notifications/x/acknowledge', 'POST /api/v1/findings/x/assist', 'POST /api/v1/admin/initialize-empty-import'] },
     institution_admin: { allow: ['POST /api/v1/imports/confirm', 'POST /api/v1/corrections/x/decision', 'POST /api/v1/notifications/x/acknowledge'], deny: ['POST /api/v1/findings/x/decision', 'POST /api/v1/matches/x/decision', 'POST /api/v1/automation/revalidate', 'POST /api/v1/admin/initialize-empty-import'] },
     platform_admin: { allow: ['POST /api/v1/ai/check', 'POST /api/v1/automation/revalidate', 'GET /api/v1/ai/status', 'POST /api/v1/admin/initialize-empty-import'], deny: ['GET /api/v1/findings', 'GET /api/v1/records', 'GET /api/v1/audit', 'GET /api/v1/receipts/x', 'POST /api/v1/findings/x/decision'] }
   };
   for (const [role, { allow, deny }] of Object.entries(expected)) {
-    const p = principalOf({ name: role, subject: role, scope: 'all', roles: [role], method: 'test' });
+    const p = principalOf({ name: role, subject: role, scope: role === 'institution_admin' ? 'institution' : 'all', institutionCode: role === 'institution_admin' ? 'NITM' : null, roles: [role], method: 'test' });
     for (const r of allow) { const [m, u] = r.split(' '); assert.ok(p.capabilities.includes(routeRule(m, u).capability), `${role} may ${r}`); }
     const { app, loads } = spyApp(fixed(p));
     for (const r of deny) {
       const [m, u] = r.split(' ');
       const res = await call(app, { method: m, url: u, json: {} });
-      assert.equal(res.status, 403, `${role} may not ${r}`); assert.equal(res.json.code, 'forbidden'); assert.equal(res.json.capability, routeRule(m, u).capability);
+      assert.equal(res.status, 403, `${role} may not ${r}`); assert.equal(res.json.code, 'forbidden');
+      const requiredCapability = p.scope === 'all' && p.capabilities.includes('imports.write') && m === 'POST' && ['/api/v1/imports/preview', '/api/v1/imports/confirm'].includes(u) ? 'imports.multi_institution' : routeRule(m, u).capability;
+      assert.equal(res.json.capability, requiredCapability);
     }
     assert.equal(loads.length, 0, `${role}: refused requests loaded no data`);
   }
-  assert.deepEqual(Object.keys(ROLES).sort(), ['auditor', 'institution_admin', 'platform_admin', 'reviewer']);
+  const unscopedAdmin = principalOf({ name: 'unscoped-admin', subject: 'unscoped-admin', scope: 'all', roles: ['institution_admin'], method: 'test' });
+  const unscoped = spyApp(fixed(unscopedAdmin));
+  const importResponse = await call(unscoped.app, { method: 'POST', url: '/api/v1/imports/confirm', json: {} });
+  assert.equal(importResponse.status, 403, 'all-institution visibility alone cannot authorize an unscoped import');
+  assert.equal(importResponse.json.capability, 'imports.multi_institution');
+  assert.equal(unscoped.loads.length, 0, 'an unscoped import is refused before loading data');
+  assert.deepEqual(Object.keys(ROLES).sort(), ['auditor', 'hosted_demo_viewer', 'institution_admin', 'platform_admin', 'reviewer']);
+  assert.throws(() => validateAccount({ username: 'public.viewer', display_name: 'Public Viewer', role: 'hosted_demo_viewer', institution_code: null }), /role must be one of/);
 });
 
 test('JWT verification accepts valid RS256 and ES256 tokens and rejects every tampered or misdirected one', () => {
@@ -161,7 +186,11 @@ test('in OIDC mode roles come only from server-side memberships; headers and tok
   const nitm = await call(app, { url: '/api/v1/records', headers: { ...bearer('nitm-1'), 'x-demo-role': 'regulator', 'x-demo-institution': 'RCA' } });
   assert.equal(nitm.status, 200); assert.ok(nitm.json.data.every(r => r.institution_code === 'NITM'), 'spoofed scope headers change nothing');
   const reg = await call(app, { url: '/api/v1/dashboard/summary', headers: bearer('reg-1') });
-  assert.equal(reg.json.principal.role, 'regulator'); assert.equal(reg.json.principal.name, 'Regulator Reviewer One'); assert.equal(reg.json.principal.method, 'oidc');
+  assert.equal(reg.json.principal.role, 'reviewer'); assert.equal(reg.json.principal.scope, 'all'); assert.equal(reg.json.principal.name, 'Regulator Reviewer One'); assert.equal(reg.json.principal.method, 'oidc');
+  assert.equal(reg.json.data.institutions, 3, 'all-scope reviewer retains cross-institution aggregate read access');
+  const allScopeRecords = await call(app, { url: '/api/v1/records', headers: bearer('reg-1') });
+  assert.equal(allScopeRecords.status, 200, 'all-scope reviewer retains record read access');
+  assert.ok(allScopeRecords.json.total > 0);
   assert.ok(!reg.json.principal.capabilities.includes('automation.revalidate'));
 });
 
@@ -205,7 +234,7 @@ test('authentication configuration is validated at startup and fails closed', ()
   assert.equal(authFromEnv({ EDUTRACE_AUTH: 'local' }, 'demo', { usersPath: path.join(dir, 'demo-users.json') }).kind, 'local', 'local sign-in is explicitly opt-in for the synthetic demo');
   assert.throws(() => authFromEnv({ EDUTRACE_AUTH: 'basic' }, 'development'), StartupError);
   assert.throws(() => authFromEnv({ EDUTRACE_AUTH: 'oidc' }, 'development'), /missing EDUTRACE_OIDC_ISSUER/);
-  assert.throws(() => authFromEnv({ EDUTRACE_AUTH: 'oidc' }, 'demo'), /supports simulated viewing or opt-in local accounts/);
+  assert.throws(() => authFromEnv({ EDUTRACE_AUTH: 'oidc' }, 'demo'), /supports demo_header, local, or hosted_demo authentication only/);
   const jwks = path.join(dir, 'jwks.json'); const members = path.join(dir, 'members.json');
   fs.writeFileSync(jwks, JSON.stringify({ keys: KEYS })); fs.writeFileSync(members, JSON.stringify(MEMBERSHIPS));
   assert.equal(authFromEnv({ EDUTRACE_AUTH: 'oidc', EDUTRACE_OIDC_ISSUER: ISSUER, EDUTRACE_OIDC_AUDIENCE: AUDIENCE, EDUTRACE_OIDC_JWKS_PATH: jwks, EDUTRACE_MEMBERSHIPS_PATH: members }, 'development').kind, 'oidc');

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: edutrace-demo
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: npm start
+    healthCheckPath: /healthz
+    # In-memory sessions and failed-login counters require a single instance. Keep autoscaling capped at one.
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+      targetCPUPercent: 80
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: EDUTRACE_MODE
+        value: demo
+      - key: EDUTRACE_AUTH
+        value: hosted_demo
+      - key: EDUTRACE_HOSTED_DEMO_PASSWORD_HASH
+        sync: false

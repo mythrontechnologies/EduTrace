@@ -8,17 +8,22 @@ const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { Readable } = require('node:stream');
 const { spawn } = require('node:child_process');
+const net = require('node:net');
 const { createApp, start, setProvider, READ_ONLY } = require('../server');
 const { createDemoStore, buildDemoDataset, ReadOnlyError } = require('../src/demo-data');
+const { hostedDemoAuthenticator } = require('../src/auth');
 const { createProvider } = require('../src/ai-provider');
 const { DEFAULT_DATA } = require('../src/seed');
 const { HOSTING_MARKERS } = require('../src/mode');
+const { hashPassword } = require('../src/accounts');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const fileHash = file => (fs.existsSync(file) ? sha(fs.readFileSync(file)) : null);
 const REAL_DB_BEFORE = fileHash(DEFAULT_DATA);
+const HOSTED_TEST_PASSWORD = 'test-only-hosted-viewer-password-2026';
+const HOSTED_TEST_PASSWORD_HASH = hashPassword(HOSTED_TEST_PASSWORD);
 
 // Drives an app in-process, like the other API tests. `onBodyRead` fires if the handler reads the request body.
 function call(app, { method = 'GET', url, headers = {}, json, onBodyRead }) {
@@ -195,6 +200,31 @@ test('the mutation list covers every write route registered in server.js', () =>
   }
 });
 
+test('hosted Demo rejects all registered writes before body reads or data loads', async () => {
+  let loads = 0;
+  const store = createDemoStore(undefined, { onLoad() { loads++; } });
+  const app = createApp({ mode: 'demo', store, auth: hostedDemoAuthenticator({ passwordHash: HOSTED_TEST_PASSWORD_HASH, secureCookies: false }) });
+  for (const [method, url, json] of [...mutations(), ...OTHER_WRITES.map(([m, u]) => [m, u, {}])]) {
+    let bodyRead = false;
+    const requestJson = url === '/api/v1/auth/login' ? { password: 'invalid test password' } : json;
+    const response = await call(app, { method, url, json: requestJson, headers: { ...SPOOF, ...(url === '/api/v1/auth/login' ? { 'content-type': 'application/json' } : {}) }, onBodyRead: () => { bodyRead = true; } });
+    if (url === '/api/v1/auth/login') {
+      assert.equal(response.status, 401, 'login is an authentication endpoint, not a data mutation');
+      assert.equal(bodyRead, true, 'login alone reads its bounded credential request');
+      continue;
+    }
+    if (url === '/api/v1/auth/logout') {
+      assert.equal(response.status, 401, 'logout requires an authenticated session');
+      assert.equal(bodyRead, false, 'unauthenticated logout does not read its request body');
+      continue;
+    }
+    assert.equal(response.status, 403, `${method} ${url}`);
+    assert.deepEqual(response.json, READ_ONLY, `${method} ${url} uses the read-only contract`);
+    assert.equal(bodyRead, false, `${method} ${url} body was not read`);
+  }
+  assert.equal(loads, 0, 'rejected hosted writes never load the data store');
+});
+
 test('rejected writes leave records, versions, findings, links, decisions, notifications and audit history unchanged', async () => {
   const { app } = startDemo();
   try {
@@ -326,6 +356,100 @@ test('local judging demo backend binds only to IPv4 loopback', async () => {
   } finally { console.log = log; await new Promise(resolve => app.close(resolve)); }
 });
 
+test('hosted demo binds externally on PORT and keeps health and mutation safeguards active', async () => {
+  const port = await new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const selected = probe.address().port;
+      probe.close(error => error ? reject(error) : resolve(selected));
+    });
+  });
+  const originalLog = console.log; let startupLog = ''; console.log = (...args) => { startupLog += `${args.join(' ')}\n`; };
+  let app;
+  try {
+    const hostedEnv = { EDUTRACE_MODE: 'demo', EDUTRACE_AUTH: 'hosted_demo', EDUTRACE_HOSTED_DEMO_PASSWORD_HASH: HOSTED_TEST_PASSWORD_HASH, RENDER: 'true', PORT: String(port) };
+    app = start(hostedEnv);
+    await new Promise(resolve => app.once('listening', resolve));
+    assert.equal(app.address().address, '0.0.0.0');
+    assert.equal(app.address().port, port, 'the listener uses the platform-provided PORT');
+    assert.match(startupLog, new RegExp(`http://0\\.0\\.0\\.0:${port}(?:\\s|$)`), 'startup reports the externally bound address and actual port');
+    assert.equal(startupLog.includes(HOSTED_TEST_PASSWORD), false);
+    assert.equal(startupLog.includes(HOSTED_TEST_PASSWORD_HASH), false);
+    for (const extra of [
+      { EDUTRACE_AUTH: 'demo_header' },
+      { EDUTRACE_AUTH: 'local' },
+      { EDUTRACE_INTEGRATIONS: 'mock' },
+      { EDUTRACE_STORE: 'json' },
+      { EDUTRACE_DATABASE_URL: 'postgres://invalid.example/unused' },
+      { EDUTRACE_AI_PROVIDER: 'ollama' },
+      { PORT: 'not-a-port' }
+    ]) {
+      assert.throws(() => start({ EDUTRACE_MODE: 'demo', RENDER: 'true', ...extra }), /Hosted Demo|PORT must/);
+    }
+    assert.throws(() => start({ EDUTRACE_MODE: 'demo', RENDER: 'true', EDUTRACE_AUTH: 'demo_header', EDUTRACE_HOSTED_DEMO_PASSWORD_HASH: HOSTED_TEST_PASSWORD_HASH }), /EDUTRACE_AUTH=hosted_demo/);
+    assert.throws(() => start({ EDUTRACE_MODE: 'demo', RENDER: 'true', EDUTRACE_AUTH: 'local', EDUTRACE_HOSTED_DEMO_PASSWORD_HASH: HOSTED_TEST_PASSWORD_HASH }), /EDUTRACE_AUTH=hosted_demo/);
+    assert.throws(() => start({ EDUTRACE_MODE: 'demo', RENDER: 'true', EDUTRACE_AUTH: 'hosted_demo' }), /EDUTRACE_HOSTED_DEMO_PASSWORD_HASH/);
+    assert.throws(() => start({ EDUTRACE_MODE: 'demo', RENDER: 'true', EDUTRACE_AUTH: 'hosted_demo', EDUTRACE_HOSTED_DEMO_PASSWORD_HASH: 'not-a-valid-hash' }), /valid scrypt hash/);
+
+    const health = await fetch(`http://127.0.0.1:${port}/healthz`);
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { status: 'ok' });
+
+    const runtime = await http(port, '/api/v1/runtime');
+    assert.equal(runtime.status, 200);
+    assert.equal(runtime.body.data.mode, 'demo');
+    assert.equal(runtime.body.data.auth, 'hosted_demo');
+    assert.equal(runtime.body.data.data_source, 'synthetic_in_memory');
+    assert.equal(runtime.body.data.ai_enabled, false);
+    assert.deepEqual(Object.keys(runtime.body.data).sort(), ['ai_enabled', 'auth', 'data_source', 'mode', 'read_only', 'registration_enabled']);
+    assert.equal(runtime.body.data.registration_enabled, false);
+    const anonymous = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/summary`, { headers: { 'x-demo-role': 'regulator', authorization: 'Bearer admin' } });
+    assert.equal(anonymous.status, 401, 'protected reads require a hosted session even if privileged headers are supplied');
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/institutions`)).status, 401, 'institution metadata is also protected');
+    const login = await fetch(`http://127.0.0.1:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${port}` }, body: JSON.stringify({ password: HOSTED_TEST_PASSWORD }) });
+    assert.equal(login.status, 200);
+    assert.doesNotMatch(login.headers.get('set-cookie'), /password|hash/i);
+    assert.match(login.headers.get('set-cookie'), /HttpOnly/);
+    assert.match(login.headers.get('set-cookie'), /SameSite=Strict/);
+    assert.match(login.headers.get('set-cookie'), /Secure/);
+    assert.equal(login.headers.get('cache-control'), 'no-store');
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    for (const role of [undefined, 'institution', 'regulator']) {
+      const headers = role ? { 'x-demo-role': role, 'x-demo-institution': 'RCA' } : {};
+      const summary = await fetch(`http://127.0.0.1:${port}/api/v1/dashboard/summary`, { headers: { cookie, ...headers } });
+      assert.equal(summary.status, 200);
+      const summaryBody = await summary.json();
+      const principal = summaryBody.principal;
+      assert.equal(principal.method, 'hosted_demo');
+      assert.equal(principal.authenticated, true, 'read access follows successful password authentication');
+      assert.equal(principal.role, 'hosted_demo_viewer');
+      assert.deepEqual(principal.roles, ['hosted_demo_viewer']);
+      assert.deepEqual(principal.capabilities, ['records.read']);
+      assert.equal(principal.scope, 'all');
+      assert.equal(principal.institution_code, null, 'client role and institution headers cannot change hosted scope');
+      assert.equal(summaryBody.data.institutions, 3, 'the viewer sees the synthetic all-institution scope');
+    }
+    const session = await http(port, '/api/v1/auth/session', { headers: { cookie } });
+    assert.equal(session.body.data.authenticated, true);
+    assert.equal(session.body.data.viewer.role, 'hosted_demo_viewer');
+    const integrations = await http(port, '/api/v1/integrations', { headers: { cookie } });
+    assert.equal(integrations.body.data.adapter, 'none');
+    assert.ok(integrations.body.data.services.every(service => !service.connected && !service.simulated));
+
+    for (const url of ['/api/v1/demo/reset', '/api/v1/imports/confirm']) {
+      const response = await fetch(`http://127.0.0.1:${port}${url}`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-demo-role': 'regulator' }, body: '{}'
+      });
+      assert.equal(response.status, 403, `${url} remains blocked in hosted Demo`);
+      assert.equal((await response.json()).code, 'read_only_demo');
+    }
+  } finally {
+    console.log = originalLog;
+    if (app?.listening) await new Promise(resolve => app.close(resolve));
+  }
+});
+
 test('development mode still starts by default and uses its file store', async () => {
   const project = copyProject();
   const file = path.join(project, 'scratch-db.json');
@@ -355,22 +479,46 @@ test('the UI reads the mode from the server and says when it is read-only', () =
   const html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
   const imports = fs.readFileSync(path.join(PUBLIC, 'import.js'), 'utf8');
   const recon = fs.readFileSync(path.join(PUBLIC, 'reconciliation.js'), 'utf8');
+  const matches = fs.readFileSync(path.join(PUBLIC, 'matches.js'), 'utf8');
   assert.match(html, /id="modeBanner" role="status" hidden/);
   assert.match(app, /api\('\/api\/v1\/runtime'\)/);
   assert.ok(app.includes('if (!(await loadRuntime())) return;'), 'runtime and local session are resolved before the first view renders');
-  assert.match(app, /handleEntryNavigation\(\);/, 'demo and synthetic-test workspace routes are checked against the server runtime');
+  assert.match(app, /handleEntryNavigation\(\);/, 'the server-selected experience opens directly after runtime resolution');
   assert.match(app, /error\.readOnly = data\.code === 'read_only_demo'/);
+  assert.match(app, /state\.auth === 'hosted_demo'[\s\S]*?\.demo-card'\)\.hidden = true/);
+  assert.match(app, /state\.auth === 'hosted_demo'[\s\S]*?state\.role = 'hosted_demo_viewer'/, 'hosted Demo keeps its fixed viewer identity in client state');
+  assert.doesNotMatch(app, /state\.auth === 'hosted_demo'[\s\S]{0,120}state\.role = 'regulator'/, 'hosted Demo never impersonates the simulated regulator');
+  assert.match(app, /\$\('#ovAutomationAction'\)\.innerHTML = state\.role === 'regulator'/, 'regulator-only revalidation is omitted for the hosted viewer');
+  assert.match(app, /ai\.configured && state\.role === 'regulator'/, 'regulator-only AI health checks are omitted for the hosted viewer');
+  assert.match(app, /\$\('\[data-route="audit"\]'\)\.hidden = true/);
+  assert.match(app, /\$\('#exportAll'\)\.hidden = true/);
+  assert.match(app, /\$\('#rxExport'\)\.hidden = true/);
+  assert.match(app, /state\.auth === 'hosted_demo' \|\| params\.get\('tab'\) === 'imports'/);
+  assert.match(matches, /e\.receipt_id && state\.auth !== 'hosted_demo'/);
+  assert.match(recon, /event\.receipt_id && state\.auth !== 'hosted_demo'/);
+  assert.match(app, /state\.runtime\.auth === 'hosted_demo'[\s\S]*?state\.runtime\.ai_enabled !== false/);
+  assert.match(app, /if \(state\.auth === 'hosted_demo'\) \{[\s\S]*?\/api\/v1\/auth\/session[\s\S]*?showLogin\(\); return false/,
+    'hosted users must have an authenticated session before the route renders');
+  assert.match(app, /const hosted = state\.auth === 'hosted_demo'/);
+  assert.match(app, /credentials = hosted \? \{ password \} : \{ username, password \}/);
+  assert.match(app, /api\('\/api\/v1\/auth\/logout', \{ method: 'POST'/);
+  assert.match(html, /id="hostedSignOut" hidden/);
+  assert.match(html, /id="loginUsernameField"/);
+  assert.match(app, /registrationLink\.hidden = state\.runtime\?\.registration_enabled !== true/);
+  assert.match(app, /const route = location\.hash[\s\S]*\|\| 'overview'/, 'refresh and deep links use the server-selected workspace without a local selection key');
+  assert.match(app, /addEventListener\('hashchange', handleEntryNavigation\)/);
+  assert.match(app, /addEventListener\('popstate', handleEntryNavigation\)/, 'browser back and forward re-run the app router');
+  assert.match(app, /showStartupError\('EduTrace could not confirm the server configuration/);
   assert.match(app, /reset\.disabled = state\.readOnly \|\|/);
   assert.match(imports, /if \(state\.readOnly\) return/, 'no file input is rendered in the read-only demo');
   assert.match(recon, /state\.readOnly\s*\?\s*await api\(`\/api\/v1\/findings\/\$\{encodeURIComponent\(f\.id\)\}\/explanation`\)/);
-  assert.match(html, /id="entryScreen"[\s\S]*?id="entryTitle">Welcome to EduTrace AI/);
-  assert.deepEqual([...html.matchAll(/data-entry-mode="([^"]+)"/g)].map(match => match[1]), ['demo', 'synthetic-test']);
-  assert.match(html, /Demo Mode[\s\S]*?Explore synthetic enrolment records[\s\S]*?Read-only synthetic data[\s\S]*?Continue to Demo Login/);
-  assert.match(html, /Synthetic Test Mode[\s\S]*?Test CSV uploads[\s\S]*?discarded on restart[\s\S]*?Enter Synthetic Test Workspace/);
-  assert.match(app, /selected !== state\.runtime\?\.mode/);
-  assert.match(app, /selected === 'demo'\) return state\.auth === 'local' && Boolean\(state\.user\)/, 'Demo Mode requires an authenticated local account');
-  assert.match(app, /selected === 'synthetic-test' && state\.auth === 'synthetic_test'/, 'Synthetic Test Mode requires the server-selected test runtime');
-  assert.match(html, /id="loginEntryBack"/);
+  assert.match(html, /id="entryScreen"[\s\S]*?id="entryTitle">Opening EduTrace/);
+  assert.match(html, /id="entryStatus" role="status" aria-live="polite"/);
+  assert.doesNotMatch(html, /data-entry-mode|Choose your workspace|Synthetic Test Mode|Continue to Demo Login/);
+  assert.doesNotMatch(app, /ENTRY_MODE_KEY|entryAllowed|chooseEntryMode|demo-login/);
+  assert.match(app, /registrationLink\.hidden = state\.runtime\?\.registration_enabled !== true/);
+  assert.match(app, /if \(state\.auth === 'local'\)[\s\S]*?showLogin\(\); return false/,
+    'login is reachable only through server-selected local authentication');
   assert.match(html, /href="styles\.css"/);
   assert.doesNotMatch(html, /(?:href|src)="\/(?:styles\.css|app\.js|reconciliation\.js|import\.js)/, 'mounted browser assets resolve beneath the mode prefix');
   assert.match(app, /fetch\(`\$\{APP_BASE\}\$\{path\}`/);

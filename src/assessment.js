@@ -122,7 +122,7 @@ function assessFinding(db, f, p = null) {
   }
   const now = recompute(db, f, idx);
   // A principal sees counts only for what is in scope; findings themselves are already scope-checked.
-  const scoped = p && p.role !== 'regulator' ? now.facts.filter(x => !['records_sharing_identifier', 'automatically_linked_pairs', 'pairs_needing_investigation', 'active_institutions'].includes(x.key)) : now.facts;
+  const scoped = p && p.scope !== 'all' ? now.facts.filter(x => !['records_sharing_identifier', 'automatically_linked_pairs', 'pairs_needing_investigation', 'active_institutions'].includes(x.key)) : now.facts;
   return {
     status: 'current', condition_present: now.present, summary: now.summary, basis: now.basis, reclassified_as: now.reclassified_as || null,
     stale_original: now.present === false || (now.basis === 'recomputed' && now.summary !== f.explanation),

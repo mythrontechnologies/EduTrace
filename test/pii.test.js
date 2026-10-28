@@ -5,12 +5,14 @@ const { EventEmitter } = require('node:events');
 const { Readable } = require('node:stream');
 const { createApp } = require('../server');
 const { saveDemo, loadDemo } = require('../src/seed');
-const { buildDemoDataset } = require('../src/demo-data');
-const { principalOf } = require('../src/auth');
+const { buildDemoDataset, createDemoStore } = require('../src/demo-data');
+const { createProvider } = require('../src/ai-provider');
+const { principalOf, hostedDemoAuthenticator } = require('../src/auth');
+const { hashPassword } = require('../src/accounts');
 const { REVEAL_ROUTES, maskPII } = require('../src/pii');
 
-const call = (app, { method = 'GET', url, json }) => new Promise(resolve => {
-  const req = Readable.from(json === undefined ? [] : [JSON.stringify(json)]); req.method = method; req.url = url; req.headers = { host: 'localhost' };
+const call = (app, { method = 'GET', url, json, headers = {} }) => new Promise(resolve => {
+  const req = Readable.from(json === undefined ? [] : [JSON.stringify(json)]); req.method = method; req.url = url; req.headers = { host: 'localhost', ...headers };
   const res = new EventEmitter(); const chunks = []; let status = 200; res.writeHead = c => { status = c; }; res.end = v => { if (v) chunks.push(v); resolve({ status, text: chunks.join('') }); };
   app.emit('request', req, res);
 });
@@ -61,6 +63,48 @@ test('names and dates of birth are masked everywhere except record-level views f
   assert.ok(graph.nodes.filter(n => n.type === 'record').every(n => n.detail.student_name.includes('•') && !names.some(x => n.label.includes(x))), 'graph names and labels are masked');
   const audit = JSON.parse((await call(reviewer, { url: '/api/v1/audit?limit=200' })).text).data;
   assert.ok(audit.flatMap(e => e.record_context).every(c => c.student_name.includes('•')));
+});
+
+test('hosted Demo has only records.read and masks PII on every exercised public record response', async () => {
+  const db = buildDemoDataset();
+  const auth = hostedDemoAuthenticator({ passwordHash: hashPassword('test-only-hosted-viewer-password-2026'), secureCookies: false });
+  const login = auth.login({ headers: {}, socket: { remoteAddress: 'test-pii' } }, { password: 'test-only-hosted-viewer-password-2026' });
+  const cookie = login.setCookie.split(';')[0];
+  const app = createApp({ mode: 'demo', store: createDemoStore(), auth, getProvider: () => createProvider({ env: {}, disabled: 'disabled in hosted Demo' }) });
+  const viewer = auth.authenticate({ method: 'GET', headers: { cookie,
+    'x-demo-role': 'regulator', 'x-demo-institution': 'RCA', 'x-edutrace-mode': 'development',
+    'x-http-method-override': 'GET', authorization: 'Bearer admin'
+  } });
+  assert.equal(viewer.role, 'hosted_demo_viewer');
+  assert.deepEqual(viewer.roles, ['hosted_demo_viewer']);
+  assert.deepEqual(viewer.capabilities, ['records.read']);
+  assert.equal(viewer.authenticated, true);
+
+  const link = db.identityLinks.find(item => item.outcome === 'candidate_for_review');
+  const finding = db.findings.find(item => item.lifecycle_status === 'current' && item.rule_code === 'IDENTIFIER_ATTRIBUTE_CONFLICT');
+  const urls = [
+    '/api/v1/dashboard/summary', '/api/v1/imports', '/api/v1/automation', '/api/v1/matches', `/api/v1/matches/${link.id}`,
+    '/api/v1/records?limit=200', '/api/v1/records?limit=200&offset=200', '/api/v1/records/SRC-41', '/api/v1/records/SRC-1/lineage', '/api/v1/identities/SRC-1/history',
+    '/api/v1/profiles/SRC-41', '/api/v1/corrections?status=all', '/api/v1/notifications', '/api/v1/graph',
+    '/api/v1/findings?lifecycle=all', `/api/v1/findings/${finding.id}`, `/api/v1/findings/${finding.id}/explanation`,
+    '/api/v1/records/SRC-3/verification', `/api/v1/evidence/checklist?finding=${finding.id}`
+  ];
+  const spoof = { cookie, 'x-demo-role': 'regulator', 'x-demo-institution': 'RCA', 'x-edutrace-mode': 'development', 'x-http-method-override': 'GET', authorization: 'Bearer admin', 'x-hosted-demo-csrf': 'ignored' };
+  const { ids, names, dobs } = secrets(db);
+  for (const url of urls) {
+    const response = await call(app, { url, headers: spoof });
+    assert.equal(response.status, 200, `${url} remains available to the walkthrough`);
+    for (const value of [...ids, ...names, ...dobs]) assert.ok(!response.text.includes(JSON.stringify(value)), `${url} contains only masked personal fields`);
+  }
+  for (const code of ['NITM', 'RCA', 'SVU']) {
+    const response = await call(app, { url: `/api/v1/records?institution=${code}`, headers: spoof });
+    assert.equal(response.status, 200);
+    assert.ok(JSON.parse(response.text).data.length > 0, `public walkthrough can read synthetic ${code} records`);
+  }
+  for (const url of ['/api/v1/audit?limit=200', '/api/v1/reports/findings.csv', '/api/v1/ai/status']) {
+    const response = await call(app, { url, headers: spoof });
+    assert.equal(response.status, 403, `${url} requires a capability the public viewer does not have`);
+  }
 });
 
 test('simulations, consent, decisions and receipts are masked, and so is the import preview', async () => {
