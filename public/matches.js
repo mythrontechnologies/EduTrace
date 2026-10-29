@@ -420,10 +420,11 @@ function mxFieldRow(field, index) {
 
 function mxExplanation(d) {
   const e = d.explanation;
+  const unavailable = state.auth === 'hosted_demo' ? 'Unavailable in the hosted demo.' : 'Not provided.';
   const list = (fields, cls, iconName, empty) => fields.length ? fields.map(f => `<span class="ev-tag ${cls}">${icon(iconName, 'icon-xs')}${esc(MX_FIELD[f] || f)}</span>`).join('') : `<span class="muted">${empty}</span>`;
   return `<p class="mx-kicker-rule">${icon('shield', 'icon-xs')}Deterministic evidence · policy <code>${esc(e.policy_version)}</code></p>
   <dl class="why-list">
-    <div><dt>Policy result</dt><dd><span class="badge ${MX_RESOLUTION_TONE[e.resolution] || 'tone-neutral'}">${esc(e.resolution_label)}</span>${e.withdrawn ? `<p>An automatic match between these records was withdrawn ${esc(relTime(e.withdrawn.at))} because new evidence contradicted it.</p>` : ''}
+    <div><dt>Policy result</dt><dd><span class="badge ${MX_RESOLUTION_TONE[e.resolution] || 'tone-neutral'}">${esc(e.resolution_label || `Outcome details ${unavailable.toLowerCase()}`)}</span>${e.withdrawn ? `<p>An automatic match between these records was withdrawn ${esc(relTime(e.withdrawn.at))} because new evidence contradicted it.</p>` : ''}
       <details class="mx-policy"><summary>What the automatic-link policy requires</summary><ol>${e.policy.conditions.map(c => `<li>${esc(c)}</li>`).join('')}</ol><p>${esc(e.policy.never)}</p></details></dd></div>
     <div><dt>Method</dt><dd>${mxMethodBadge(e.method_kind, e.method_label)}<p>${esc(e.method_description)}</p></dd></div>
     <div><dt>Agree</dt><dd class="tag-row">${list(e.agreeing_fields, 'is-agree', 'check', 'No identity attribute agrees')}${list(e.similar_fields || [], 'is-similar', 'help', '').replace('<span class="muted"></span>', '')}</dd></div>
@@ -432,7 +433,7 @@ function mxExplanation(d) {
     <div><dt>Contradictions</dt><dd class="tag-row">${e.disqualifiers.length ? e.disqualifiers.map(x => `<span class="ev-tag is-conflict">${icon('alert-triangle', 'icon-xs')}${esc(x.label)}</span>`).join('') : '<span class="muted">None recorded</span>'}</dd></div>
     <div><dt>Why it was raised</dt><dd>${esc(e.why)}</dd></div>
     ${e.uncertainty ? `<div><dt>Why it is uncertain</dt><dd>${esc(e.uncertainty)}</dd></div>` : ''}
-    <div><dt>Recommendation</dt><dd><strong>${esc(e.recommendation)}</strong></dd></div>
+    <div><dt>Recommendation</dt><dd><strong>${esc(e.recommendation || `Recommendation ${unavailable.toLowerCase()}`)}</strong></dd></div>
     <div><dt>Evidence score</dt><dd><span class="score-pill">${esc(e.score.value)} / ${esc(e.score.max)}</span><p class="muted">${esc(e.score.note)}</p>
       ${(e.factors || []).length ? `<table class="data-table compact factor-table"><caption class="sr-only">Contributing factors</caption><thead><tr><th scope="col">Field</th><th scope="col">Result</th><th scope="col">Weight</th></tr></thead><tbody>${(e.factors || []).map(f => `<tr><td>${esc(MX_FIELD[f.field] || f.field)}</td><td title="${esc(f.note)}">${esc(MX_FACTOR[f.result] || f.result)}</td><td class="num">${f.weight > 0 ? '+' : ''}${esc(f.weight)}</td></tr>`).join('')}</tbody></table>` : ''}</dd></div>
     <div><dt>Limitations</dt><dd><ul class="mx-limits">${e.limitations.map(x => `<li>${esc(x)}</li>`).join('')}</ul></dd></div>
@@ -441,7 +442,8 @@ function mxExplanation(d) {
 }
 
 function mxAiPanel(d) {
-  const ai = d.ai;
+  if (state.auth === 'hosted_demo') return `<p class="ai-status">AI assistance is unavailable in the hosted demo.</p>`;
+  const ai = d.ai || {};
   const provider = ai.provider;
   const m = ai.match_explanation;
   const parts = [];
@@ -462,7 +464,7 @@ function mxAiPanel(d) {
     ? `<p class="ai-status">${icon('info', 'icon-xs')}Model assistance is off; the deterministic explanation above is complete.</p>`
     : `<button type="button" class="btn btn-secondary btn-sm" id="mxAskModel">${icon('flask', 'icon-sm')}${m && !m.stale ? 'Refresh model commentary' : 'Ask the model to explain this evidence'}</button>
        <p class="ai-provider-line">${esc(provider.label)} · <code>${esc(provider.model)}</code> · ${esc(provider.health || '')}. Only field results are sent — no names, dates or identifiers.</p>`;
-  return `${parts.join('')}${action}<p class="ai-effect">${icon('shield', 'icon-xs')}${esc(ai.effect)}</p>`;
+  return `${parts.join('')}${action}<p class="ai-effect">${icon('shield', 'icon-xs')}${esc(ai.effect || 'Advisory only. AI commentary never determines an identity match.')}</p>`;
 }
 
 async function mxAskModel(event) {

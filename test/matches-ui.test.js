@@ -78,6 +78,7 @@ function renderHostedDetail(detail) {
   const matchesSource = fs.readFileSync(require.resolve('../public/matches.js'), 'utf8');
   const detailRenderer = matchesSource.slice(matchesSource.indexOf('function mxRenderDetail()'), matchesSource.indexOf('\nfunction mxValue('));
   const explanationRenderer = matchesSource.slice(matchesSource.indexOf('function mxExplanation(d)'), matchesSource.indexOf('\nfunction mxAiPanel('));
+  const aiRenderer = matchesSource.slice(matchesSource.indexOf('function mxAiPanel(d)'), matchesSource.indexOf('\nasync function mxAskModel('));
   const panel = { innerHTML: '', removeAttribute() {} };
   const context = {
     state: { auth: 'hosted_demo' }, mx: { detail, data: { total: 1 } }, MX_NARROW: { matches: false },
@@ -86,12 +87,12 @@ function renderHostedDetail(detail) {
     $: selector => selector === '#mxDetail' ? panel : { addEventListener() {}, focus() {} }, $$: () => [],
     icon: () => '', esc: value => String(value ?? ''), fmtDate: () => '', relTime: () => '',
     mxLayoutMode() {}, mxQueueStatusBadge: () => '', mxMethodBadge: () => '', mxSourceLine: () => '',
-    mxFieldRow: () => '<li>field</li>', mxAiPanel: () => '<div>model commentary omitted</div>',
+    mxFieldRow: () => '<li>field</li>',
     mxDecisionPanel: () => '', mxBindDecision() {}, mxAskModel() {}, routeHash: () => '#',
     isAwaitingAction: () => false, outcomeLabel: value => value
   };
   vm.createContext(context);
-  vm.runInContext(`${detailRenderer}\n${explanationRenderer}\nglobalThis.renderDetail = mxRenderDetail;`, context);
+  vm.runInContext(`${detailRenderer}\n${explanationRenderer}\n${aiRenderer}\nglobalThis.renderDetail = mxRenderDetail;`, context);
   context.renderDetail();
   return panel.innerHTML;
 }
@@ -142,12 +143,16 @@ test('hosted-safe matches response renders through the list flow without status 
 
 test('hosted-projected match detail renders without factors, renders present factors, and hides audit history', async () => {
   await withHostedApp(async ({ detail }) => {
+    assert.equal(Object.hasOwn(detail, 'ai'), false, 'hosted projection omits private AI metadata');
     assert.equal(Object.hasOwn(detail, 'history'), false, 'hosted projection omits protected audit history');
     assert.equal(Object.hasOwn(detail.explanation, 'factors'), false, 'hosted projection currently omits factors');
 
     const withoutFactors = renderHostedDetail(detail);
     assert.match(withoutFactors, /Field comparison/);
     assert.match(withoutFactors, /Why these records are candidates/);
+    assert.match(withoutFactors, /AI assistance is unavailable in the hosted demo/);
+    assert.match(withoutFactors, /Outcome details unavailable in the hosted demo/);
+    assert.match(withoutFactors, /Recommendation unavailable in the hosted demo/);
     assert.doesNotMatch(withoutFactors, /Audit history for this pair/);
 
     const withFactors = renderHostedDetail({
